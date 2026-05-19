@@ -3,10 +3,10 @@ RUN npm install -g pnpm
 WORKDIR /app
 COPY . .
 RUN pnpm install --no-frozen-lockfile --shamefully-hoist
-RUN pnpm --filter @ai-sdr/database build
-RUN pnpm --filter @ai-sdr/core build
-RUN pnpm --filter @ai-sdr/integrations build
-RUN pnpm --filter @ai-sdr/api build
+RUN NODE_OPTIONS="--max-old-space-size=512" pnpm --filter @ai-sdr/database build
+RUN NODE_OPTIONS="--max-old-space-size=512" pnpm --filter @ai-sdr/core build
+RUN NODE_OPTIONS="--max-old-space-size=512" pnpm --filter @ai-sdr/integrations build
+RUN NODE_OPTIONS="--max-old-space-size=512" pnpm --filter @ai-sdr/api build
 
 FROM node:20-alpine AS runner
 RUN npm install -g pnpm
@@ -18,7 +18,7 @@ COPY --from=builder /app/apps/api/package.json ./apps/api/
 COPY --from=builder /app/packages/database/package.json ./packages/database/
 COPY --from=builder /app/packages/integrations/package.json ./packages/integrations/
 COPY --from=builder /app/packages/core/package.json ./packages/core/
-RUN pnpm install --frozen-lockfile --prod
+RUN pnpm install --no-frozen-lockfile --prod --shamefully-hoist
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/packages/database/dist ./packages/database/dist
 COPY --from=builder /app/packages/core/dist ./packages/core/dist
