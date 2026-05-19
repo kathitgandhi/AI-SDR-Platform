@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: ai-sdr-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  call-workers:
+    build:
+      context: .
+      dockerfile: apps/workers/Dockerfile
+    container_name: ai-sdr-call-workers
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - WORKER_TYPES=call-executor,transcript-processor
+    depends_on:
+      - redis
+
+  pipeline-workers:
+    build:
+      context: .
+      dockerfile: apps/workers/Dockerfile
+    container_name: ai-sdr-pipeline-workers
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - WORKER_TYPES=lead-import,enrichment,phone-lookup,email-sender,email-sequence,reporting,crm-sync
+    depends_on:
+      - redis
+
+  mcp:
+    build:
+      context: .
+      dockerfile: apps/mcp-server/Dockerfile
+    container_name: ai-sdr-mcp
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai-sdr-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:
