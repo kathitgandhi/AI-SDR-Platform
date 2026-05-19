@@ -1,28 +1,22 @@
-FROM node:20-alpine AS base
+FROM node:20-alpine AS builder
 RUN npm install -g pnpm
 WORKDIR /app
-
-FROM base AS deps
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY apps/mcp-server/package.json ./apps/mcp-server/
-COPY packages/database/package.json ./packages/database/
-COPY packages/core/package.json ./packages/core/
-RUN pnpm install --frozen-lockfile
-
-FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @ai-sdr/database build
 RUN pnpm --filter @ai-sdr/core build
+RUN pnpm --filter @ai-sdr/integrations build
 RUN pnpm --filter @ai-sdr/mcp-server build
 
 FROM node:20-alpine AS runner
 RUN npm install -g pnpm
 WORKDIR /app
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY apps/mcp-server/package.json ./apps/mcp-server/
-COPY packages/database/package.json ./packages/database/
-COPY packages/core/package.json ./packages/core/
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/pnpm-workspace.yaml ./
+COPY --from=builder /app/pnpm-lock.yaml ./
+COPY --from=builder /app/apps/mcp-server/package.json ./apps/mcp-server/
+COPY --from=builder /app/packages/database/package.json ./packages/database/
+COPY --from=builder /app/packages/core/package.json ./packages/core/
 RUN pnpm install --frozen-lockfile --prod
 COPY --from=builder /app/apps/mcp-server/dist ./apps/mcp-server/dist
 COPY --from=builder /app/packages/database/dist ./packages/database/dist
