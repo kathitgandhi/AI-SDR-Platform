@@ -2,7 +2,7 @@ FROM node:20-alpine AS builder
 RUN npm install -g pnpm
 WORKDIR /app
 COPY . .
-RUN pnpm install --frozen-lockfile --shamefully-hoist
+RUN pnpm install --no-frozen-lockfile --shamefully-hoist
 RUN pnpm --filter @ai-sdr/database build
 RUN pnpm --filter @ai-sdr/core build
 RUN pnpm --filter @ai-sdr/integrations build
