@@ -1,0 +1,252 @@
+# ============================================================
+# AI SDR PLATFORM — RENDER DEPLOYMENT MANIFEST
+# ============================================================
+
+services:
+  # ---- API SERVER ----
+  - type: web
+    name: ai-sdr-api
+    runtime: node
+    region: ohio
+    plan: standard
+    branch: main
+    rootDir: apps/api
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: node dist/index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    scaling:
+      minInstances: 1
+      maxInstances: 5
+      targetMemoryPercent: 80
+      targetCPUPercent: 70
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ai-sdr-redis
+          property: connectionString
+      - key: TELNYX_API_KEY
+        sync: false
+      - key: TELNYX_CONNECTION_ID
+        sync: false
+      - key: TELNYX_WEBHOOK_SECRET
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: ZOOMINFO_CLIENT_ID
+        sync: false
+      - key: ZOOMINFO_CLIENT_SECRET
+        sync: false
+      - key: API_SECRET_KEY
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: COMPANY_NAME
+        sync: false
+      - key: GMAIL_FROM_ADDRESS
+        sync: false
+      - key: GMAIL_FROM_NAME
+        sync: false
+      - key: GMAIL_CC_HOT_LEADS
+        sync: false
+      - key: MCP_AUTH_TOKEN
+        sync: false
+
+  # ---- CALL + TRANSCRIPT WORKERS ----
+  - type: worker
+    name: ai-sdr-call-workers
+    runtime: node
+    region: ohio
+    plan: standard
+    branch: main
+    rootDir: apps/workers
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: node dist/index.js
+    autoDeploy: true
+    scaling:
+      minInstances: 1
+      maxInstances: 3
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: WORKER_TYPES
+        value: call-executor,transcript-processor
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ai-sdr-redis
+          property: connectionString
+      - key: TELNYX_API_KEY
+        sync: false
+      - key: TELNYX_CONNECTION_ID
+        sync: false
+      - key: TELNYX_FROM_NUMBER
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_AGENT_MIKE
+        sync: false
+      - key: ELEVENLABS_AGENT_SARAH
+        sync: false
+      - key: ELEVENLABS_AGENT_DAVID
+        sync: false
+      - key: ELEVENLABS_AGENT_RACHEL
+        sync: false
+      - key: ELEVENLABS_AGENT_CHRIS
+        sync: false
+      - key: ELEVENLABS_AGENT_EMMA
+        sync: false
+      - key: ELEVENLABS_AGENT_DANIEL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CALL_MAX_CONCURRENT
+        value: "10"
+      - key: CALL_PACING_DELAY_MS
+        value: "2000"
+      - key: CALL_WINDOW_START_HOUR
+        value: "8"
+      - key: CALL_WINDOW_END_HOUR
+        value: "21"
+      - key: COMPANY_NAME
+        sync: false
+
+  # ---- PIPELINE WORKERS (lead import, enrichment, email) ----
+  - type: worker
+    name: ai-sdr-pipeline-workers
+    runtime: node
+    region: ohio
+    plan: starter
+    branch: main
+    rootDir: apps/workers
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: node dist/index.js
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: WORKER_TYPES
+        value: lead-import,enrichment,phone-lookup,email-sender,email-sequence,reporting,crm-sync
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ai-sdr-redis
+          property: connectionString
+      - key: ZOOMINFO_CLIENT_ID
+        sync: false
+      - key: ZOOMINFO_CLIENT_SECRET
+        sync: false
+      - key: TELNYX_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: GMAIL_FROM_ADDRESS
+        sync: false
+      - key: GMAIL_FROM_NAME
+        sync: false
+      - key: GMAIL_CC_HOT_LEADS
+        sync: false
+      - key: CRM_PROVIDER
+        sync: false
+      - key: HUBSPOT_ACCESS_TOKEN
+        sync: false
+      - key: SALESFORCE_CLIENT_ID
+        sync: false
+      - key: SALESFORCE_CLIENT_SECRET
+        sync: false
+      - key: SALESFORCE_REFRESH_TOKEN
+        sync: false
+      - key: SALESFORCE_INSTANCE_URL
+        sync: false
+
+  # ---- WEB ADMIN DASHBOARD ----
+  - type: web
+    name: ai-sdr-web
+    runtime: node
+    region: ohio
+    plan: starter
+    branch: main
+    rootDir: apps/web
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: node .next/standalone/server.js
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: NEXT_PUBLIC_API_BASE_URL
+        fromService:
+          type: web
+          name: ai-sdr-api
+          property: host
+      - key: API_INTERNAL_SECRET
+        sync: false
+
+  # ---- MCP SERVER ----
+  - type: web
+    name: ai-sdr-mcp
+    runtime: node
+    region: ohio
+    plan: starter
+    branch: main
+    rootDir: apps/mcp-server
+    buildCommand: pnpm install --frozen-lockfile && pnpm build
+    startCommand: node dist/server.js
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ai-sdr-redis
+          property: connectionString
+      - key: MCP_AUTH_TOKEN
+        sync: false
+
+  # ---- REDIS ----
+  - type: redis
+    name: ai-sdr-redis
+    region: ohio
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []

@@ -1,0 +1,22 @@
+{
+  "name": "@ai-sdr/integrations",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdr/database": "workspace:*",
+    "@anthropic-ai/sdk": "^0.30.0",
+    "axios": "^1.7.0",
+    "googleapis": "^140.0.0",
+    "google-auth-library": "^9.11.0",
+    "pino": "^9.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5"
+  }
+}

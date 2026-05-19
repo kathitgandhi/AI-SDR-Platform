@@ -1,0 +1,21 @@
+{
+  "_comment": "Add this block to your Claude Desktop config file.",
+  "_config_location": {
+    "windows": "%APPDATA%\\Claude\\claude_desktop_config.json",
+    "mac": "~/Library/Application Support/Claude/claude_desktop_config.json"
+  },
+
+  "mcpServers": {
+    "ai-sdr-platform": {
+      "_comment_local": "Use this block when running the MCP server locally (stdio mode)",
+      "command": "node",
+      "args": ["C:\\Projects\\AI Sales Bot\\apps\\mcp-server\\dist\\server.js"],
+      "env": {
+        "SUPABASE_URL": "https://your-project.supabase.co",
+        "SUPABASE_SERVICE_ROLE_KEY": "your-service-role-key",
+        "REDIS_URL": "rediss://default:password@your-redis.upstash.io:6380",
+        "MCP_AUTH_TOKEN": "your-mcp-auth-token"
+      }
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "name": "@ai-sdr/mobile",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "start": "react-native start",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "@ai-sdr/database": "workspace:*",
+    "@react-native-async-storage/async-storage": "^1.23.1",
+    "@react-navigation/bottom-tabs": "^6.5.20",
+    "@react-navigation/native": "^6.1.17",
+    "@react-navigation/native-stack": "^6.9.26",
+    "@supabase/supabase-js": "^2.43.0",
+    "@tanstack/react-query": "^5.45.0",
+    "react": "18.2.0",
+    "react-native": "0.73.6",
+    "react-native-config": "^1.5.3",
+    "react-native-safe-area-context": "^4.10.1",
+    "react-native-screens": "^3.31.1",
+    "react-native-url-polyfill": "^2.0.0",
+    "react-native-vector-icons": "^10.1.0",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0",
+    "@babel/preset-env": "^7.20.0",
+    "@babel/runtime": "^7.20.0",
+    "@react-native/babel-preset": "^0.73.21",
+    "@react-native/eslint-config": "^0.73.2",
+    "@react-native/metro-config": "^0.73.5",
+    "@react-native/typescript-config": "^0.73.1",
+    "@types/react": "^18.2.6",
+    "@types/react-native-vector-icons": "^6.4.18",
+    "babel-jest": "^29.6.3",
+    "typescript": "5.0.4"
+  }
+}

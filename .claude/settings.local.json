@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Projects\\\\AI Sales Bot\" -Recurse -File | Select-Object -ExpandProperty FullName | Sort-Object | ForEach-Object { $_.Replace\\(\"C:\\\\Projects\\\\AI Sales Bot\\\\\", \"\"\\) })",
+      "PowerShell(head -200)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Projects\\\\AI Sales Bot\\\\packages\\\\integrations\\\\src\" -Filter \"*.ts\" -Recurse -File)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Projects\\\\AI Sales Bot\\\\apps\\\\api\\\\src\" -Recurse -Directory)",
+      "Bash(Select-Object FullName)",
+      "Bash(git init *)",
+      "Bash(git remote *)",
+      "Bash(git add *)"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@ai-sdr/core",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdr/database": "workspace:*",
+    "@supabase/supabase-js": "^2.43.0",
+    "luxon": "^3.4.4",
+    "pino": "^9.2.0"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.4.2",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5"
+  }
+}

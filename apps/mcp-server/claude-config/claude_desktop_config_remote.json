@@ -1,0 +1,17 @@
+{
+  "_comment": "Use this when the MCP server is deployed to Render (HTTP/SSE mode).",
+  "_config_location": {
+    "windows": "%APPDATA%\\Claude\\claude_desktop_config.json",
+    "mac": "~/Library/Application Support/Claude/claude_desktop_config.json"
+  },
+
+  "mcpServers": {
+    "ai-sdr-platform": {
+      "type": "sse",
+      "url": "https://ai-sdr-mcp.onrender.com/sse",
+      "headers": {
+        "Authorization": "Bearer your-mcp-auth-token-here"
+      }
+    }
+  }
+}
