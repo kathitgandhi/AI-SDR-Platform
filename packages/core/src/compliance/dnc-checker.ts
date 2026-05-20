@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 import crypto from 'crypto';
 import { Logger } from 'pino';
 
@@ -16,7 +17,9 @@ export class DncChecker {
   private readonly cacheTtlMs = 5 * 60 * 1000; // 5 minutes
 
   constructor(supabaseUrl: string, serviceRoleKey: string, logger: Logger) {
-    this.supabase = createClient(supabaseUrl, serviceRoleKey);
+    this.supabase = createClient(supabaseUrl, serviceRoleKey, {
+      realtime: { transport: WebSocket as any },
+    });
     this.logger = logger.child({ module: 'DncChecker' });
   }
 
