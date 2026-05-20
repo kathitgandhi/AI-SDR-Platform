@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
+import { getUserId } from '../../shared/user-scope';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -11,8 +12,11 @@ export function createDashboardRouter({ supabase }: RouterContext): Router {
   const router = Router();
 
   // GET /api/v1/dashboard
-  router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
+  router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const userId = getUserId(req);
+      const scope = <T>(q: T): T => (userId ? (q as any).eq('created_by', userId) : q);
+
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const todayIso = today.toISOString();
@@ -28,26 +32,26 @@ export function createDashboardRouter({ supabase }: RouterContext): Router {
         recentCallsRes,
         agentStatsRes,
       ] = await Promise.all([
-        supabase
+        scope(supabase
           .from('calls')
           .select('outcome, duration_seconds, meeting_booked, decision_maker_reached')
-          .gte('created_at', todayIso),
-        supabase
+          .gte('created_at', todayIso)),
+        scope(supabase
           .from('appointments')
           .select('id, status')
           .gte('created_at', weekStart.toISOString())
-          .in('status', ['scheduled', 'confirmed', 'held']),
-        supabase
+          .in('status', ['scheduled', 'confirmed', 'held'])),
+        scope(supabase
           .from('campaigns')
           .select('id')
-          .eq('status', 'active'),
-        supabase
+          .eq('status', 'active')),
+        scope(supabase
           .from('leads')
           .select('id, score')
           .in('stage', ['qualified', 'meeting_booked'])
           .order('score', { ascending: false })
-          .limit(5),
-        supabase
+          .limit(5)),
+        scope(supabase
           .from('calls')
           .select(`
             id, persona, outcome, duration_seconds, created_at,
@@ -55,28 +59,28 @@ export function createDashboardRouter({ supabase }: RouterContext): Router {
             companies(name)
           `)
           .order('created_at', { ascending: false })
-          .limit(8),
-        supabase
+          .limit(8)),
+        scope(supabase
           .from('calls')
           .select('persona, outcome, meeting_booked')
           .eq('status', 'completed')
-          .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()),
+          .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())),
       ]);
 
       const todayCalls = todayCallsRes.data ?? [];
       const totalToday = todayCalls.length;
-      const meetingsToday = todayCalls.filter((c) => c.meeting_booked).length;
-      const dmReachedToday = todayCalls.filter((c) => c.decision_maker_reached).length;
+      const meetingsToday = todayCalls.filter((c: any) => c.meeting_booked).length;
+      const dmReachedToday = todayCalls.filter((c: any) => c.decision_maker_reached).length;
       const avgDuration = totalToday > 0
-        ? Math.round(todayCalls.reduce((sum, c) => sum + (c.duration_seconds ?? 0), 0) / totalToday)
+        ? Math.round(todayCalls.reduce((sum: number, c: any) => sum + (c.duration_seconds ?? 0), 0) / totalToday)
         : 0;
 
-      // Agent stats aggregation
       const agentMap: Record<string, { calls: number; meetings: number }> = {};
       for (const call of agentStatsRes.data ?? []) {
-        if (!agentMap[call.persona]) agentMap[call.persona] = { calls: 0, meetings: 0 };
-        agentMap[call.persona].calls++;
-        if (call.meeting_booked) agentMap[call.persona].meetings++;
+        const c = call as any;
+        if (!agentMap[c.persona]) agentMap[c.persona] = { calls: 0, meetings: 0 };
+        agentMap[c.persona].calls++;
+        if (c.meeting_booked) agentMap[c.persona].meetings++;
       }
       const agentStats = Object.entries(agentMap).map(([persona, s]) => ({
         persona,

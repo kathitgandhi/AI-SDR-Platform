@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
 import { NotFoundError } from '../../shared/errors';
+import { getUserId } from '../../shared/user-scope';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -14,6 +15,7 @@ export function createCallsRouter({ supabase, logger: _logger }: RouterContext):
   // GET /api/v1/calls/meetings — must be before /:id
   router.get('/meetings', async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const userId = getUserId(req);
       const { status, limit = '50', offset = '0' } = req.query as Record<string, string>;
 
       let query = supabase
@@ -28,6 +30,7 @@ export function createCallsRouter({ supabase, logger: _logger }: RouterContext):
         `, { count: 'exact' })
         .order('scheduled_at', { ascending: false });
 
+      if (userId) query = query.eq('created_by', userId);
       if (status) query = query.eq('status', status);
 
       query = query.range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
@@ -69,6 +72,7 @@ export function createCallsRouter({ supabase, logger: _logger }: RouterContext):
   // GET /api/v1/calls
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const userId = getUserId(req);
       const {
         persona, outcome, campaign_id,
         limit = '50', offset = '0',
@@ -84,6 +88,7 @@ export function createCallsRouter({ supabase, logger: _logger }: RouterContext):
         `, { count: 'exact' })
         .order('created_at', { ascending: false });
 
+      if (userId) query = query.eq('created_by', userId);
       if (persona) query = query.eq('persona', persona);
       if (outcome) query = query.eq('outcome', outcome);
       if (campaign_id) query = query.eq('campaign_id', campaign_id);
@@ -102,7 +107,8 @@ export function createCallsRouter({ supabase, logger: _logger }: RouterContext):
   // GET /api/v1/calls/:id/transcript
   router.get('/:id/transcript', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { data: call, error: callError } = await supabase
+      const userId = getUserId(req);
+      let q = supabase
         .from('calls')
         .select(`
           id, persona, outcome, status, duration_seconds, talk_time_seconds,
@@ -111,8 +117,9 @@ export function createCallsRouter({ supabase, logger: _logger }: RouterContext):
           contacts(id, first_name, last_name, title, email, phone),
           companies(id, name, retail_vertical, store_count, website)
         `)
-        .eq('id', req.params.id)
-        .single();
+        .eq('id', req.params.id);
+      if (userId) q = q.eq('created_by', userId);
+      const { data: call, error: callError } = await q.single();
 
       if (callError || !call) throw new NotFoundError('Call', req.params.id);
 

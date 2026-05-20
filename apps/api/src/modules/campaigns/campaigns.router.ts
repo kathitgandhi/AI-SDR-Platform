@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
 import { NotFoundError, ValidationError } from '../../shared/errors';
+import { getUserId } from '../../shared/user-scope';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -12,9 +13,10 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
   const router = Router();
 
   // GET /api/v1/campaigns
-  router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
+  router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { data, error } = await supabase
+      const userId = getUserId(req);
+      let query = supabase
         .from('campaigns')
         .select(`
           id, name, description, status, target_verticals, target_titles,
@@ -23,7 +25,9 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
           started_at, paused_at, completed_at, created_at, updated_at
         `)
         .order('created_at', { ascending: false });
+      if (userId) query = query.eq('created_by', userId);
 
+      const { data, error } = await query;
       if (error) throw error;
       res.json({ campaigns: data ?? [] });
     } catch (err) {
@@ -34,15 +38,13 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
   // GET /api/v1/campaigns/:id
   router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { data: campaign, error } = await supabase
-        .from('campaigns')
-        .select('*')
-        .eq('id', req.params.id)
-        .single();
+      const userId = getUserId(req);
+      let query = supabase.from('campaigns').select('*').eq('id', req.params.id);
+      if (userId) query = query.eq('created_by', userId);
+      const { data: campaign, error } = await query.single();
 
       if (error || !campaign) throw new NotFoundError('Campaign', req.params.id);
 
-      // Lead stage breakdown
       const { data: stageData } = await supabase
         .from('leads')
         .select('stage')
@@ -53,7 +55,6 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
         stageCounts[lead.stage] = (stageCounts[lead.stage] ?? 0) + 1;
       }
 
-      // Recent activity
       const { data: recentCalls } = await supabase
         .from('calls')
         .select('id, persona, outcome, duration_seconds, created_at')
@@ -70,6 +71,7 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
   // POST /api/v1/campaigns
   router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const userId = getUserId(req);
       const {
         name, description, target_verticals, target_titles,
         daily_call_limit, hourly_call_limit, max_concurrent_calls,
@@ -77,19 +79,22 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
       } = req.body;
       if (!name) throw new ValidationError('name is required');
 
+      const insert: Record<string, unknown> = {
+        name,
+        description,
+        target_verticals,
+        target_titles,
+        daily_call_limit: daily_call_limit ?? 100,
+        hourly_call_limit: hourly_call_limit ?? 20,
+        max_concurrent_calls: max_concurrent_calls ?? 5,
+        enabled_personas,
+        status: status ?? 'draft',
+      };
+      if (userId) insert.created_by = userId;
+
       const { data, error } = await supabase
         .from('campaigns')
-        .insert({
-          name,
-          description,
-          target_verticals,
-          target_titles,
-          daily_call_limit: daily_call_limit ?? 100,
-          hourly_call_limit: hourly_call_limit ?? 20,
-          max_concurrent_calls: max_concurrent_calls ?? 5,
-          enabled_personas,
-          status: status ?? 'draft',
-        })
+        .insert(insert)
         .select()
         .single();
 
@@ -104,12 +109,13 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
   // PATCH /api/v1/campaigns/:id/pause
   router.patch('/:id/pause', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { data, error } = await supabase
+      const userId = getUserId(req);
+      let query = supabase
         .from('campaigns')
         .update({ status: 'paused', updated_at: new Date().toISOString() })
-        .eq('id', req.params.id)
-        .select()
-        .single();
+        .eq('id', req.params.id);
+      if (userId) query = query.eq('created_by', userId);
+      const { data, error } = await query.select().single();
 
       if (error || !data) throw new NotFoundError('Campaign', req.params.id);
       logger.info({ campaignId: req.params.id }, 'Campaign paused');
@@ -122,12 +128,13 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
   // PATCH /api/v1/campaigns/:id/resume
   router.patch('/:id/resume', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { data, error } = await supabase
+      const userId = getUserId(req);
+      let query = supabase
         .from('campaigns')
         .update({ status: 'active', updated_at: new Date().toISOString() })
-        .eq('id', req.params.id)
-        .select()
-        .single();
+        .eq('id', req.params.id);
+      if (userId) query = query.eq('created_by', userId);
+      const { data, error } = await query.select().single();
 
       if (error || !data) throw new NotFoundError('Campaign', req.params.id);
       logger.info({ campaignId: req.params.id }, 'Campaign resumed');
@@ -140,18 +147,16 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
   // PATCH /api/v1/campaigns/:id/pacing
   router.patch('/:id/pacing', async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const userId = getUserId(req);
       const { daily_call_limit, max_concurrent_calls, hourly_call_limit } = req.body;
       const updates: Record<string, number | string> = { updated_at: new Date().toISOString() };
       if (daily_call_limit !== undefined) updates.daily_call_limit = daily_call_limit;
       if (max_concurrent_calls !== undefined) updates.max_concurrent_calls = max_concurrent_calls;
       if (hourly_call_limit !== undefined) updates.hourly_call_limit = hourly_call_limit;
 
-      const { data, error } = await supabase
-        .from('campaigns')
-        .update(updates)
-        .eq('id', req.params.id)
-        .select()
-        .single();
+      let query = supabase.from('campaigns').update(updates).eq('id', req.params.id);
+      if (userId) query = query.eq('created_by', userId);
+      const { data, error } = await query.select().single();
 
       if (error || !data) throw new NotFoundError('Campaign', req.params.id);
       res.json({ campaign: data });

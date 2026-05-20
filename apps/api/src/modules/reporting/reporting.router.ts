@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
+import { getUserId } from '../../shared/user-scope';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -18,12 +19,14 @@ export function createReportingRouter({ supabase, logger: _logger }: RouterConte
       const from = date_from ?? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
       const to = date_to ?? new Date().toISOString().slice(0, 10);
 
+      const userId = getUserId(req);
       let query = supabase
         .from('calls')
         .select('persona, outcome, status, duration_seconds, talk_time_seconds, meeting_booked, decision_maker_reached, voicemail_left, dnc_requested, created_at')
         .gte('created_at', `${from}T00:00:00Z`)
         .lte('created_at', `${to}T23:59:59Z`);
 
+      if (userId) query = query.eq('created_by', userId);
       if (campaign_id) query = query.eq('campaign_id', campaign_id);
 
       const { data: calls, error } = await query;
@@ -78,10 +81,13 @@ export function createReportingRouter({ supabase, logger: _logger }: RouterConte
       const days = parseInt((req.query.days as string) ?? '30');
       const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-      const { data: calls, error } = await supabase
+      const userId = getUserId(req);
+      let leaderQ = supabase
         .from('calls')
         .select('persona, outcome, status, duration_seconds, talk_time_seconds, meeting_booked, decision_maker_reached, qualification_score')
         .gte('created_at', since);
+      if (userId) leaderQ = leaderQ.eq('created_by', userId);
+      const { data: calls, error } = await leaderQ;
 
       if (error) throw error;
 
@@ -123,11 +129,14 @@ export function createReportingRouter({ supabase, logger: _logger }: RouterConte
   });
 
   // GET /api/v1/reporting/pipeline
-  router.get('/pipeline', async (_req: Request, res: Response, next: NextFunction) => {
+  router.get('/pipeline', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { data: leads, error } = await supabase
+      const userId = getUserId(req);
+      let pipelineQ = supabase
         .from('leads')
         .select('stage, score, campaign_id, meeting_booked_at');
+      if (userId) pipelineQ = pipelineQ.eq('created_by', userId);
+      const { data: leads, error } = await pipelineQ;
 
       if (error) throw error;
 

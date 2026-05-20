@@ -1,14 +1,12 @@
 /**
- * Seed a complete demo call into Supabase so the frontend has real data to show.
- * - Creates company, contact, lead, campaign
- * - Creates a call with transcript
- * - Runs Claude analysis on the transcript
- * - Writes qualification result + outcome to the call
- * - Updates lead stage to meeting_booked
- * - Creates an appointment
+ * Seed a complete demo call into Supabase for a specific user.
+ *
+ * Required env var:
+ *   SEED_USER_EMAIL=test@aisdr.app
  *
  * Run on EC2:
- *   sudo docker compose exec call-workers node /app/apps/workers/dist/seed-demo-call.js
+ *   sudo docker compose exec -e SEED_USER_EMAIL=test@aisdr.app call-workers \
+ *     node /app/apps/workers/dist/seed-demo-call.js
  */
 import pino from 'pino';
 import { createClient } from '@supabase/supabase-js';
@@ -35,8 +33,29 @@ const TRANSCRIPT = `
 [Agent Mike]: Done. Thursday 2pm Eastern. Talk soon, John.
 `;
 
+async function lookupUserId(email: string): Promise<string> {
+  let page = 1;
+  while (page <= 5) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 200 });
+    if (error) throw new Error(`Failed to list users: ${error.message}`);
+    const match = data.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+    if (match) return match.id;
+    if (data.users.length < 200) break;
+    page++;
+  }
+  throw new Error(`No Supabase auth user found with email: ${email}`);
+}
+
 async function main() {
-  logger.info('Seeding demo call...');
+  const targetEmail = process.env.SEED_USER_EMAIL;
+  if (!targetEmail) {
+    logger.error('Set SEED_USER_EMAIL env var (e.g. SEED_USER_EMAIL=test@aisdr.app)');
+    process.exit(1);
+  }
+
+  logger.info({ targetEmail }, 'Looking up user...');
+  const userId = await lookupUserId(targetEmail);
+  logger.info({ userId, email: targetEmail }, 'Resolved user');
 
   // 1. Campaign
   const { data: campaign, error: campErr } = await supabase
@@ -51,6 +70,7 @@ async function main() {
       enabled_personas: ['mike'],
       status: 'active',
       started_at: new Date().toISOString(),
+      created_by: userId,
     })
     .select()
     .single();
@@ -67,6 +87,7 @@ async function main() {
       website: 'https://wholefoodsmarket.com',
       annual_revenue: 16000000000,
       employee_count: 95000,
+      created_by: userId,
     })
     .select()
     .single();
@@ -83,6 +104,7 @@ async function main() {
       title: 'VP of Operations',
       email: 'john.demo@wholefoods.example',
       phone: '+15125550199',
+      created_by: userId,
     })
     .select()
     .single();
@@ -100,13 +122,14 @@ async function main() {
       score: 75,
       call_attempts: 1,
       last_called_at: new Date().toISOString(),
+      created_by: userId,
     })
     .select()
     .single();
   if (leadErr) throw leadErr;
   logger.info({ id: lead.id }, 'Created lead');
 
-  // 5. Run Claude analysis
+  // 5. Claude analysis
   const claude = new ClaudeReasoningService(
     workerEnv.ANTHROPIC_API_KEY,
     workerEnv.ANTHROPIC_MODEL,
@@ -126,7 +149,7 @@ async function main() {
   const analysis = result.callAnalysis;
   const qual = result.qualificationData;
 
-  // 6. Call record
+  // 6. Call
   const startedAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   const answeredAt = new Date(Date.now() - 4 * 60 * 1000).toISOString();
   const endedAt = new Date().toISOString();
@@ -152,6 +175,7 @@ async function main() {
       created_at: startedAt,
       answered_at: answeredAt,
       ended_at: endedAt,
+      created_by: userId,
     })
     .select()
     .single();
@@ -163,9 +187,9 @@ async function main() {
     call_id: call.id,
     full_transcript: TRANSCRIPT,
   });
-  if (trErr) logger.warn({ err: trErr }, 'Transcript insert failed (table may not exist or schema differs)');
+  if (trErr) logger.warn({ err: trErr }, 'Transcript insert failed');
 
-  // 8. Update lead with qualification + stage
+  // 8. Lead update
   const { error: updErr } = await supabase
     .from('leads')
     .update({
@@ -175,7 +199,7 @@ async function main() {
       meeting_booked_at: new Date().toISOString(),
     })
     .eq('id', lead.id);
-  if (updErr) logger.warn({ err: updErr }, 'Lead update failed (some fields may not exist)');
+  if (updErr) logger.warn({ err: updErr }, 'Lead update failed');
 
   // 9. Appointment
   const meetingTime = new Date();
@@ -202,27 +226,23 @@ async function main() {
       store_count: qual.store_count ?? 500,
       budget_indication: qual.budget_range ?? '$4M',
       decision_timeline: qual.rollout_timeline ?? 'Q3',
+      created_by: userId,
     })
     .select()
     .single();
-  if (apptErr) logger.warn({ err: apptErr }, 'Appointment insert failed (some fields may not exist)');
+  if (apptErr) logger.warn({ err: apptErr }, 'Appointment insert failed');
   else logger.info({ id: appt.id }, 'Created appointment');
 
   console.log('\n========== SEED COMPLETE ==========');
+  console.log(`Owner:       ${targetEmail} (${userId})`);
   console.log(`Campaign:    ${campaign.id}`);
   console.log(`Company:     ${company.id} (${company.name})`);
   console.log(`Contact:     ${contact.id}`);
-  console.log(`Lead:        ${lead.id} → stage: meeting_booked, score: ${analysis.qualification_score}`);
-  console.log(`Call:        ${call.id} → outcome: ${analysis.outcome}`);
+  console.log(`Lead:        ${lead.id}`);
+  console.log(`Call:        ${call.id}`);
   console.log(`Appointment: ${appt?.id ?? '(failed)'}`);
   console.log(`Claude cost: $${result.costUsd.toFixed(4)}`);
   console.log('====================================\n');
-  console.log('Refresh the Lovable dashboard — you should now see:');
-  console.log('  • 1 call today, 1 meeting booked');
-  console.log('  • 1 active campaign');
-  console.log('  • 1 hot lead');
-  console.log('  • Recent call entry from Mike');
-  console.log('  • Appointment scheduled for next Thursday\n');
 
   process.exit(0);
 }
