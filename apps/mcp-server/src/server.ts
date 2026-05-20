@@ -5,6 +5,7 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 import { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import pino from 'pino';
@@ -19,7 +20,8 @@ const logger = pino({ level: 'info' });
 
 const supabase = createClient(
   process.env['SUPABASE_URL']!,
-  process.env['SUPABASE_SERVICE_ROLE_KEY']!
+  process.env['SUPABASE_SERVICE_ROLE_KEY']!,
+  { realtime: { transport: WebSocket } }
 );
 
 const redis = new Redis(process.env['REDIS_URL']!);

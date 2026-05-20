@@ -1,5 +1,6 @@
 import { Redis } from 'ioredis';
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 import pino from 'pino';
 import { workerEnv } from './config/env';
 import { createQueues, QUEUE_NAMES } from './queues/queue.registry';
@@ -12,7 +13,9 @@ const logger = pino({ level: workerEnv.LOG_LEVEL });
 const workerTypes = workerEnv.WORKER_TYPES.split(',').map(s => s.trim()).filter(Boolean);
 
 const redis = new Redis(workerEnv.REDIS_URL, { maxRetriesPerRequest: null, enableReadyCheck: false });
-const supabase = createClient(workerEnv.SUPABASE_URL, workerEnv.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = createClient(workerEnv.SUPABASE_URL, workerEnv.SUPABASE_SERVICE_ROLE_KEY, {
+  realtime: { transport: WebSocket },
+});
 const queues = createQueues(redis);
 const workers: Array<{ close: () => Promise<void> }> = [];
 
