@@ -149,8 +149,12 @@ async function main() {
   const analysis = result.callAnalysis;
   const qual = result.qualificationData;
 
+  const sentimentMap: Record<string, number> = {
+    very_negative: 0.1, negative: 0.3, neutral: 0.5, positive: 0.7, very_positive: 0.9,
+  };
+
   // 6. Call
-  const startedAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const initiatedAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
   const answeredAt = new Date(Date.now() - 4 * 60 * 1000).toISOString();
   const endedAt = new Date().toISOString();
   const { data: call, error: callErr } = await supabase
@@ -161,6 +165,8 @@ async function main() {
       contact_id: contact.id,
       company_id: company.id,
       persona: 'mike',
+      from_number: '+15125550100',
+      to_number: contact.phone_direct ?? '+15125550199',
       status: 'completed',
       outcome: analysis.outcome,
       duration_seconds: 240,
@@ -170,11 +176,17 @@ async function main() {
       decision_maker_reached: true,
       dnc_requested: false,
       qualification_score: analysis.qualification_score,
-      sentiment: analysis.sentiment,
-      summary: analysis.summary,
-      created_at: startedAt,
+      outcome_score: analysis.outcome_score ?? 80,
+      sentiment_score: sentimentMap[analysis.sentiment] ?? 0.5,
+      call_summary: analysis.summary,
+      next_steps: analysis.next_steps,
+      initiated_at: initiatedAt,
       answered_at: answeredAt,
       ended_at: endedAt,
+      ai_disclosed: true,
+      company_identified: true,
+      purpose_stated: true,
+      compliance_passed: true,
       created_by: userId,
     })
     .select()
@@ -185,7 +197,12 @@ async function main() {
   // 7. Transcript
   const { error: trErr } = await supabase.from('call_transcripts').insert({
     call_id: call.id,
+    lead_id: lead.id,
     full_transcript: TRANSCRIPT,
+    objections_raised: analysis.objections_raised ?? [],
+    pain_points_mentioned: qual.pain_points ?? [],
+    competitors_mentioned: analysis.competitors_mentioned ?? [],
+    interest_signals: analysis.interest_signals ?? [],
   });
   if (trErr) logger.warn({ err: trErr }, 'Transcript insert failed');
 
@@ -195,7 +212,15 @@ async function main() {
     .update({
       stage: 'meeting_booked',
       score: analysis.qualification_score,
-      qualification_data: qual,
+      store_count_confirmed: qual.store_count ?? null,
+      current_esl_vendor: qual.current_esl_vendor ?? null,
+      current_pos_vendor: qual.current_pos_vendor ?? null,
+      pain_points: qual.pain_points ?? [],
+      rollout_timeline: qual.rollout_timeline ?? null,
+      budget_range: qual.budget_range ?? null,
+      is_decision_maker: qual.is_decision_maker ?? null,
+      decision_process: qual.decision_process ?? null,
+      last_call_summary: analysis.summary,
       meeting_booked_at: new Date().toISOString(),
     })
     .eq('id', lead.id);
