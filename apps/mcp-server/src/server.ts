@@ -10,11 +10,11 @@ import { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import pino from 'pino';
 import { QUEUE_NAMES } from './queues.js';
-import { campaignTools } from './tools/campaigns.tool';
-import { leadsTools } from './tools/leads.tool';
-import { reportingTools } from './tools/reporting.tool';
-import { queuesTools } from './tools/queues.tool';
-import { transcriptsTools } from './tools/transcripts.tool';
+import { campaignTools } from './tools/campaigns.tool.js';
+import { leadsTools } from './tools/leads.tool.js';
+import { reportingTools } from './tools/reporting.tool.js';
+import { queuesTools } from './tools/queues.tool.js';
+import { transcriptsTools } from './tools/transcripts.tool.js';
 
 const logger = pino({ level: 'info' });
 
