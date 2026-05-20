@@ -15,11 +15,14 @@ import { createReportingRouter } from './modules/reporting/reporting.router';
 import { createQueuesRouter } from './modules/queues/queues.router';
 import { requireApiKey } from './middleware/auth.middleware';
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 
 export function createApp(): Application {
   const app = express();
 
-  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    realtime: { transport: WebSocket },
+  });
 
   // --- Security middleware ---
   app.use(helmet());
