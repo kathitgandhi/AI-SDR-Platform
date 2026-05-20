@@ -38,7 +38,9 @@ export async function requireAuth(
     try {
       const { data, error } = await supabaseAuth.auth.getUser(token);
       if (!error && data.user) {
-        req.user = { id: data.user.id, email: data.user.email };
+        req.user = data.user.email
+          ? { id: data.user.id, email: data.user.email }
+          : { id: data.user.id };
         next();
         return;
       }
