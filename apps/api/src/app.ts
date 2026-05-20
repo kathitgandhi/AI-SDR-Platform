@@ -21,7 +21,7 @@ export function createApp(): Application {
   const app = express();
 
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-    realtime: { transport: WebSocket as unknown as typeof globalThis.WebSocket },
+    realtime: { transport: WebSocket as any },
   });
 
   // --- Security middleware ---

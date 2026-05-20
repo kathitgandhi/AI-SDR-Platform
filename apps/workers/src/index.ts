@@ -14,7 +14,7 @@ const workerTypes = workerEnv.WORKER_TYPES.split(',').map(s => s.trim()).filter(
 
 const redis = new Redis(workerEnv.REDIS_URL, { maxRetriesPerRequest: null, enableReadyCheck: false });
 const supabase = createClient(workerEnv.SUPABASE_URL, workerEnv.SUPABASE_SERVICE_ROLE_KEY, {
-  realtime: { transport: WebSocket as unknown as typeof globalThis.WebSocket },
+  realtime: { transport: WebSocket as any },
 });
 const queues = createQueues(redis);
 const workers: Array<{ close: () => Promise<void> }> = [];
