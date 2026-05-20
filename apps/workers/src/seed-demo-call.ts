@@ -103,7 +103,7 @@ async function main() {
       last_name: 'Doe',
       title: 'VP of Operations',
       email: 'john.demo@wholefoods.example',
-      phone: '+15125550199',
+      phone_direct: '+15125550199',
       created_by: userId,
     })
     .select()
