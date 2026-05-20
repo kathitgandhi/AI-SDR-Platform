@@ -146,8 +146,8 @@ async function main() {
   });
   logger.info({ cost: result.costUsd }, 'Claude analysis complete');
 
-  const analysis = result.callAnalysis;
-  const qual = result.qualificationData;
+  const analysis = result.callAnalysis as any;
+  const qual = result.qualificationData as any;
 
   const sentimentMap: Record<string, number> = {
     very_negative: 0.1, negative: 0.3, neutral: 0.5, positive: 0.7, very_positive: 0.9,
