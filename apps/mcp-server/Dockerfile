@@ -23,4 +23,4 @@ COPY --from=builder /app/packages/database/dist ./packages/database/dist
 COPY --from=builder /app/packages/core/dist ./packages/core/dist
 
 EXPOSE 3001
-CMD ["node", "apps/mcp-server/dist/server.js"]
+CMD ["node", "apps/mcp-server/dist/server-http.js"]
