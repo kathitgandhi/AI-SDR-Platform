@@ -13,6 +13,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 import { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import pino from 'pino';
@@ -30,7 +31,8 @@ const MCP_AUTH_TOKEN = process.env['MCP_AUTH_TOKEN'];
 
 const supabase = createClient(
   process.env['SUPABASE_URL']!,
-  process.env['SUPABASE_SERVICE_ROLE_KEY']!
+  process.env['SUPABASE_SERVICE_ROLE_KEY']!,
+  { realtime: { transport: WebSocket as unknown as typeof globalThis.WebSocket } }
 );
 
 const redis = new Redis(process.env['REDIS_URL']!, { maxRetriesPerRequest: null });

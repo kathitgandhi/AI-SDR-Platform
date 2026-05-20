@@ -21,7 +21,7 @@ const logger = pino({ level: 'info' });
 const supabase = createClient(
   process.env['SUPABASE_URL']!,
   process.env['SUPABASE_SERVICE_ROLE_KEY']!,
-  { realtime: { transport: WebSocket } }
+  { realtime: { transport: WebSocket as unknown as typeof globalThis.WebSocket } }
 );
 
 const redis = new Redis(process.env['REDIS_URL']!);
