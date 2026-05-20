@@ -17,9 +17,10 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
       const { data, error } = await supabase
         .from('campaigns')
         .select(`
-          id, name, status, vertical, daily_limit, concurrency, hourly_limit,
-          total_leads, leads_called, leads_qualified, meetings_booked,
-          start_date, end_date, created_at, updated_at
+          id, name, description, status, target_verticals, target_titles,
+          daily_call_limit, hourly_call_limit, max_concurrent_calls,
+          enabled_personas, total_leads, calls_made, meetings_booked, emails_sent,
+          started_at, paused_at, completed_at, created_at, updated_at
         `)
         .order('created_at', { ascending: false });
 
@@ -69,21 +70,25 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
   // POST /api/v1/campaigns
   router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { name, vertical, daily_limit, concurrency, hourly_limit, start_date, end_date, target_filters } = req.body;
+      const {
+        name, description, target_verticals, target_titles,
+        daily_call_limit, hourly_call_limit, max_concurrent_calls,
+        enabled_personas, status,
+      } = req.body;
       if (!name) throw new ValidationError('name is required');
 
       const { data, error } = await supabase
         .from('campaigns')
         .insert({
           name,
-          vertical,
-          daily_limit: daily_limit ?? 100,
-          concurrency: concurrency ?? 5,
-          hourly_limit: hourly_limit ?? 20,
-          start_date,
-          end_date,
-          target_filters: target_filters ?? {},
-          status: 'active',
+          description,
+          target_verticals,
+          target_titles,
+          daily_call_limit: daily_call_limit ?? 100,
+          hourly_call_limit: hourly_call_limit ?? 20,
+          max_concurrent_calls: max_concurrent_calls ?? 5,
+          enabled_personas,
+          status: status ?? 'draft',
         })
         .select()
         .single();
@@ -135,11 +140,11 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
   // PATCH /api/v1/campaigns/:id/pacing
   router.patch('/:id/pacing', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { daily_limit, concurrency, hourly_limit } = req.body;
+      const { daily_call_limit, max_concurrent_calls, hourly_call_limit } = req.body;
       const updates: Record<string, number | string> = { updated_at: new Date().toISOString() };
-      if (daily_limit !== undefined) updates.daily_limit = daily_limit;
-      if (concurrency !== undefined) updates.concurrency = concurrency;
-      if (hourly_limit !== undefined) updates.hourly_limit = hourly_limit;
+      if (daily_call_limit !== undefined) updates.daily_call_limit = daily_call_limit;
+      if (max_concurrent_calls !== undefined) updates.max_concurrent_calls = max_concurrent_calls;
+      if (hourly_call_limit !== undefined) updates.hourly_call_limit = hourly_call_limit;
 
       const { data, error } = await supabase
         .from('campaigns')
