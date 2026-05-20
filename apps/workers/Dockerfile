@@ -5,7 +5,7 @@ COPY . .
 RUN pnpm install --no-frozen-lockfile --shamefully-hoist
 RUN NODE_OPTIONS="--max-old-space-size=512" pnpm --filter @ai-sdr/database build
 RUN NODE_OPTIONS="--max-old-space-size=512" pnpm --filter @ai-sdr/core build
-RUN NODE_OPTIONS="--max-old-space-size=512" pnpm --filter @ai-sdr/integrations build
+RUN NODE_OPTIONS="--max-old-space-size=1536" pnpm --filter @ai-sdr/integrations build
 RUN NODE_OPTIONS="--max-old-space-size=512" pnpm --filter @ai-sdr/workers build
 
 FROM node:20-alpine AS runner
