@@ -45,7 +45,7 @@ export function createCallsRouter({ supabase, logger: _logger }: RouterContext):
   router.get('/search', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { q, limit = '20' } = req.query as Record<string, string>;
-      if (!q) return res.json({ results: [] });
+      if (!q) { res.json({ results: [] }); return; }
 
       const { data, error } = await supabase
         .from('call_transcripts')
