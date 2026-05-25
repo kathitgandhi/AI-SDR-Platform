@@ -41,6 +41,7 @@ const envSchema = z.object({
   ELEVENLABS_AGENT_CHRIS: z.string().min(1),
   ELEVENLABS_AGENT_EMMA: z.string().min(1),
   ELEVENLABS_AGENT_DANIEL: z.string().min(1),
+  ELEVENLABS_AGENT_RECEPTIONIST: z.string().optional(),
 
   // Anthropic
   ANTHROPIC_API_KEY: z.string().startsWith('sk-ant-'),

@@ -78,11 +78,12 @@ export function createCallsRouter({ supabase, logger: _logger }: RouterContext):
         limit = '50', offset = '0',
       } = req.query as Record<string, string>;
 
+      const { direction } = req.query as Record<string, string>;
       let query = supabase
         .from('calls')
         .select(`
-          id, persona, outcome, status, duration_seconds, meeting_booked,
-          voicemail_left, decision_maker_reached, dnc_requested, created_at,
+          id, persona, outcome, status, direction, duration_seconds, meeting_booked,
+          voicemail_left, decision_maker_reached, dnc_requested, from_number, to_number, created_at,
           contacts(id, first_name, last_name, title),
           companies(id, name, retail_vertical)
         `, { count: 'exact' })
@@ -90,6 +91,7 @@ export function createCallsRouter({ supabase, logger: _logger }: RouterContext):
 
       if (userId) query = query.eq('created_by', userId);
       if (persona) query = query.eq('persona', persona);
+      if (direction) query = query.eq('direction', direction);
       if (outcome) query = query.eq('outcome', outcome);
       if (campaign_id) query = query.eq('campaign_id', campaign_id);
 
@@ -111,10 +113,11 @@ export function createCallsRouter({ supabase, logger: _logger }: RouterContext):
       let q = supabase
         .from('calls')
         .select(`
-          id, persona, outcome, status, duration_seconds, talk_time_seconds,
+          id, persona, outcome, status, direction, duration_seconds, talk_time_seconds,
           meeting_booked, voicemail_left, decision_maker_reached, dnc_requested,
+          from_number, to_number, call_summary, next_steps, qualification_score, sentiment_score,
           created_at, answered_at, ended_at,
-          contacts(id, first_name, last_name, title, email, phone),
+          contacts(id, first_name, last_name, title, email, phone_direct),
           companies(id, name, retail_vertical, store_count, website)
         `)
         .eq('id', req.params.id);
