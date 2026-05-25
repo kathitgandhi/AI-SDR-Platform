@@ -58,7 +58,7 @@ const envSchema = z.object({
   GMAIL_CC_HOT_LEADS: z.string().email(),
 
   // CRM
-  CRM_PROVIDER: z.enum(['hubspot', 'salesforce', 'pipedrive', 'zoho', 'none']).default('none'),
+  CRM_PROVIDER: z.enum(['hubspot', 'salesforce', 'pipedrive', 'zoho', 'airdesk360', 'none']).default('none'),
   HUBSPOT_ACCESS_TOKEN: z.string().optional(),
   HUBSPOT_PORTAL_ID: z.string().optional(),
   SALESFORCE_CLIENT_ID: z.string().optional(),
@@ -70,6 +70,8 @@ const envSchema = z.object({
   ZOHO_CLIENT_ID: z.string().optional(),
   ZOHO_CLIENT_SECRET: z.string().optional(),
   ZOHO_REFRESH_TOKEN: z.string().optional(),
+  AIRDESK360_BASE_URL: z.string().url().optional(),
+  AIRDESK360_API_KEY: z.string().optional(),
 
   // Company identity
   COMPANY_NAME: z.string().min(1),

@@ -70,6 +70,8 @@ export function createCrmAdapter(provider: string, config: Record<string, string
       return new (require('./pipedrive/pipedrive.client').PipedriveAdapter)(config);
     case 'zoho':
       return new (require('./zoho/zoho.client').ZohoAdapter)(config);
+    case 'airdesk360':
+      return new (require('./airdesk360/airdesk360.client').AirDesk360Adapter)(config);
     default:
       return new NullCrmAdapter();
   }
