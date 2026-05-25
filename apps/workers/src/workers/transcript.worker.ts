@@ -148,6 +148,42 @@ export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
         }).eq('id', leadId),
       ]);
 
+      // Capture email mentioned during the call (if contact has none yet)
+      try {
+        const mentionedEmail =
+          (analysisResult?.callAnalysis as any)?.contact_email
+          ?? (qualData as any)?.contact_email
+          ?? extractEmailFromText(fullTranscript);
+        if (mentionedEmail && !contact['email']) {
+          await deps.supabase
+            .from('contacts')
+            .update({ email: mentionedEmail, updated_at: now })
+            .eq('id', call.contact_id);
+          workerLogger.info({ contactId: call.contact_id, email: mentionedEmail }, 'Captured email from transcript');
+        }
+      } catch (err) {
+        workerLogger.warn({ err }, 'Email capture from transcript failed');
+      }
+
+      // Auto-note: persist Claude summary + next_steps as a transcript-sourced note
+      try {
+        if (analysisResult?.callAnalysis?.summary || analysisResult?.callAnalysis?.next_steps) {
+          const noteBody = [
+            analysisResult.callAnalysis.summary,
+            analysisResult.callAnalysis.next_steps ? `\n\nNext steps: ${analysisResult.callAnalysis.next_steps}` : '',
+          ].filter(Boolean).join('');
+          await deps.supabase.from('notes').insert({
+            lead_id: leadId,
+            call_id: callId,
+            body: noteBody,
+            source: 'transcript',
+            created_by: call.created_by ?? null,
+          });
+        }
+      } catch (err) {
+        workerLogger.warn({ err }, 'Auto-note insert failed (table may not exist yet — run migration 006)');
+      }
+
       // Book appointment if meeting booked
       if (outcome === 'meeting_booked' && analysisResult?.callAnalysis?.meeting_details?.booked) {
         const mtg = analysisResult.callAnalysis.meeting_details;
@@ -173,6 +209,13 @@ export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
     },
     { connection: deps.connection, concurrency: 5 }
   );
+}
+
+/** Best-effort email extraction from raw transcript text. */
+function extractEmailFromText(text: string): string | null {
+  if (!text) return null;
+  const match = text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
+  return match ? match[0] : null;
 }
 
 async function enrollInEmailSequence(

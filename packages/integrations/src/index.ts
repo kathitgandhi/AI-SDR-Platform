@@ -3,6 +3,7 @@ export * from './zoominfo/zoominfo.types';
 export * from './telnyx/telnyx.types';
 export * from './telnyx/telnyx-call.client';
 export * from './telnyx/telnyx-lookup.client';
+export * from './telnyx/telnyx-sms.client';
 export * from './elevenlabs/elevenlabs.types';
 export * from './elevenlabs/elevenlabs-agent.client';
 export * from './anthropic/reasoning.service';
