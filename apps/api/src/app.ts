@@ -13,6 +13,11 @@ import { createLeadsRouter } from './modules/leads/leads.router';
 import { createCallsRouter } from './modules/calls/calls.router';
 import { createReportingRouter } from './modules/reporting/reporting.router';
 import { createQueuesRouter } from './modules/queues/queues.router';
+import { createNotesRouter } from './modules/notes/notes.router';
+import { createTicketsRouter } from './modules/tickets/tickets.router';
+import { createEmailsRouter } from './modules/emails/emails.router';
+import { createSmsRouter, createSmsWebhookRouter } from './modules/sms/sms.router';
+import { createTransferRulesRouter } from './modules/transfer-rules/transfer-rules.router';
 import { requireApiKey } from './middleware/auth.middleware';
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
@@ -72,6 +77,7 @@ export function createApp(): Application {
     logger,
     webhookSecret: env.TELNYX_WEBHOOK_SECRET,
   }));
+  app.use('/webhooks', createSmsWebhookRouter({ supabase, logger }));
 
   // --- API routes ---
   const routerCtx = { supabase, logger };
@@ -82,6 +88,11 @@ export function createApp(): Application {
   app.use('/api/v1/calls', createCallsRouter(routerCtx));
   app.use('/api/v1/reporting', createReportingRouter(routerCtx));
   app.use('/api/v1/queues', createQueuesRouter({ logger }));
+  app.use('/api/v1/notes', createNotesRouter(routerCtx));
+  app.use('/api/v1/tickets', createTicketsRouter(routerCtx));
+  app.use('/api/v1/emails', createEmailsRouter(routerCtx));
+  app.use('/api/v1/sms', createSmsRouter(routerCtx));
+  app.use('/api/v1/transfer-rules', createTransferRulesRouter(routerCtx));
 
   // --- 404 + error handlers ---
   app.use(notFoundHandler);
