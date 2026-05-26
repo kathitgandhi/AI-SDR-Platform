@@ -134,6 +134,69 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
     }
   });
 
+  // POST /api/v1/leads/bulk-update — body: { lead_ids: [], updates: { stage?, campaign_id? } }
+  router.post('/bulk-update', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = getUserId(req);
+      const { lead_ids, updates } = req.body as { lead_ids?: string[]; updates?: Record<string, unknown> };
+      if (!Array.isArray(lead_ids) || lead_ids.length === 0) throw new ValidationError('lead_ids array required');
+      if (!updates || Object.keys(updates).length === 0) throw new ValidationError('updates object required');
+
+      const allowedFields = ['stage', 'campaign_id', 'score', 'priority', 'next_contact_at'];
+      const safe: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      for (const k of allowedFields) {
+        if (updates[k] !== undefined) safe[k] = updates[k];
+      }
+
+      let q = supabase.from('leads').update(safe).in('id', lead_ids);
+      if (userId) q = q.eq('created_by', userId);
+      const { data, error } = await q.select('id, stage');
+      if (error) throw error;
+
+      logger.info({ count: data?.length, lead_ids: lead_ids.length }, 'Bulk lead update');
+      res.json({ updated: data?.length ?? 0, updates: safe });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/v1/leads/bulk-dnc — body: { lead_ids: [], reason? }
+  router.post('/bulk-dnc', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = getUserId(req);
+      const { lead_ids, reason } = req.body as { lead_ids?: string[]; reason?: string };
+      if (!Array.isArray(lead_ids) || lead_ids.length === 0) throw new ValidationError('lead_ids array required');
+
+      // Get phone + email for each lead so we can add them to dnc_list
+      let leadQ = supabase
+        .from('leads')
+        .select('id, contacts(phone_direct, email)')
+        .in('id', lead_ids);
+      if (userId) leadQ = leadQ.eq('created_by', userId);
+      const { data: leads, error: leadErr } = await leadQ;
+      if (leadErr) throw leadErr;
+
+      const dncInserts = [];
+      for (const lead of leads ?? []) {
+        const ct = (lead as any).contacts;
+        if (!ct) continue;
+        if (ct.phone_direct) dncInserts.push({ phone: ct.phone_direct, source: 'manual', added_reason: reason ?? 'Bulk DNC', added_by: 'api', is_permanent: true, created_by: userId ?? null });
+        if (ct.email) dncInserts.push({ email: ct.email, source: 'manual', added_reason: reason ?? 'Bulk DNC', added_by: 'api', is_permanent: true, created_by: userId ?? null });
+      }
+      if (dncInserts.length > 0) await supabase.from('dnc_list').insert(dncInserts);
+
+      let updateQ = supabase.from('leads').update({ stage: 'dnc', updated_at: new Date().toISOString() }).in('id', lead_ids);
+      if (userId) updateQ = updateQ.eq('created_by', userId);
+      const { error: upErr } = await updateQ;
+      if (upErr) throw upErr;
+
+      logger.info({ count: lead_ids.length, dnc_entries: dncInserts.length }, 'Bulk DNC');
+      res.json({ updated: lead_ids.length, dnc_entries: dncInserts.length });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // POST /api/v1/leads/:id/dnc
   router.post('/:id/dnc', async (req: Request, res: Response, next: NextFunction) => {
     try {

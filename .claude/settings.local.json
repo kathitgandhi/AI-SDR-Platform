@@ -12,7 +12,10 @@
       "Bash(git add *)",
       "Bash(git commit -m 'Add Docker deployment files — Dockerfiles, docker-compose, nginx, deploy script *)",
       "Bash(git push *)",
-      "Bash(git commit -m 'Fix pnpm hoisting in Dockerfiles for TypeScript module resolution *)"
+      "Bash(git commit -m 'Fix pnpm hoisting in Dockerfiles for TypeScript module resolution *)",
+      "Bash(git checkout *)",
+      "Bash(git reset *)",
+      "mcp__Claude_in_Chrome__list_connected_browsers"
     ]
   }
 }
