@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
-import { TelnyxSmsClient } from '@ai-sdr/integrations';
+import { TelnyxSmsClient, validateTelnyxWebhookSignature } from '@ai-sdr/integrations';
 import { env } from '../../config/env';
 import { NotFoundError, ValidationError } from '../../shared/errors';
 import { getUserId } from '../../shared/user-scope';
@@ -150,6 +150,21 @@ export function createSmsWebhookRouter(deps: { supabase: SupabaseClient; logger:
   const { supabase, logger } = deps;
 
   router.post('/telnyx-sms', async (req: Request, res: Response) => {
+    // Validate Telnyx signature (defence in depth; webhook URL is public)
+    const signature = req.headers['telnyx-signature-ed25519'] as string | undefined;
+    const timestamp = req.headers['telnyx-timestamp'] as string | undefined;
+    if (signature && timestamp && env.TELNYX_WEBHOOK_SECRET) {
+      const raw = (req as any).rawBody ? (req as any).rawBody.toString() : JSON.stringify(req.body);
+      const valid = validateTelnyxWebhookSignature(raw, signature, env.TELNYX_WEBHOOK_SECRET);
+      if (!valid) {
+        logger.warn('Rejected SMS webhook with invalid signature');
+        res.status(401).json({ error: 'Invalid signature' });
+        return;
+      }
+    } else {
+      logger.warn('SMS webhook received without Telnyx signature headers — accepting in dev mode');
+    }
+
     res.status(200).json({ received: true });
 
     const payload = (req.body?.data?.payload ?? {}) as Record<string, any>;

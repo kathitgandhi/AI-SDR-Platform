@@ -107,6 +107,17 @@ async function processCallEvent(
       }).eq('id', call.id).in('status', ['answered', 'ringing', 'dialing']);
       break;
 
+    case 'call.recording.saved':
+      // Telnyx recording finished and is available
+      await supabase.from('calls').update({
+        recording_url: (payload as any).recording_urls?.mp3 ?? (payload as any).public_recording_urls?.mp3 ?? null,
+        recording_duration_seconds: (payload as any).duration_millis
+          ? Math.round((payload as any).duration_millis / 1000)
+          : null,
+        updated_at: now,
+      }).eq('id', call.id);
+      break;
+
     case 'call.machine.detection.ended':
       if (payload.answering_machine_detection?.result === 'human') {
         await supabase.from('calls').update({

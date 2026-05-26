@@ -18,6 +18,11 @@ import { createTicketsRouter } from './modules/tickets/tickets.router';
 import { createEmailsRouter } from './modules/emails/emails.router';
 import { createSmsRouter, createSmsWebhookRouter } from './modules/sms/sms.router';
 import { createTransferRulesRouter } from './modules/transfer-rules/transfer-rules.router';
+import { createSettingsRouter } from './modules/settings/settings.router';
+import { createDncRouter } from './modules/dnc/dnc.router';
+import { createImportsRouter } from './modules/imports/imports.router';
+import { createAuditRouter } from './modules/audit/audit.router';
+import { createDocsRouter } from './modules/docs/docs.router';
 import { requireApiKey } from './middleware/auth.middleware';
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
@@ -93,6 +98,13 @@ export function createApp(): Application {
   app.use('/api/v1/emails', createEmailsRouter(routerCtx));
   app.use('/api/v1/sms', createSmsRouter(routerCtx));
   app.use('/api/v1/transfer-rules', createTransferRulesRouter(routerCtx));
+  app.use('/api/v1/settings', createSettingsRouter(routerCtx));
+  app.use('/api/v1/dnc', createDncRouter(routerCtx));
+  app.use('/api/v1/imports', createImportsRouter(routerCtx));
+  app.use('/api/v1/audit', createAuditRouter(routerCtx));
+
+  // Public docs (no auth)
+  app.use('/api/docs', createDocsRouter());
 
   // --- 404 + error handlers ---
   app.use(notFoundHandler);

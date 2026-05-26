@@ -24,6 +24,9 @@ export function createDashboardRouter({ supabase }: RouterContext): Router {
       const weekStart = new Date(today);
       weekStart.setDate(today.getDate() - today.getDay());
 
+      const monthStart = new Date(today);
+      monthStart.setDate(1);
+
       const [
         todayCallsRes,
         meetingsThisWeekRes,
@@ -31,6 +34,10 @@ export function createDashboardRouter({ supabase }: RouterContext): Router {
         hotLeadsRes,
         recentCallsRes,
         agentStatsRes,
+        monthCostRes,
+        monthCallsRes,
+        funnelRes,
+        topLeadsRes,
       ] = await Promise.all([
         scope(supabase
           .from('calls')
@@ -65,6 +72,28 @@ export function createDashboardRouter({ supabase }: RouterContext): Router {
           .select('persona, outcome, meeting_booked')
           .eq('status', 'completed')
           .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())),
+        // api_usage is global — not user-scoped (provider-level)
+        supabase
+          .from('api_usage')
+          .select('cost_usd')
+          .gte('created_at', monthStart.toISOString()),
+        scope(supabase
+          .from('calls')
+          .select('id, direction, outcome, meeting_booked')
+          .gte('created_at', monthStart.toISOString())),
+        scope(supabase
+          .from('leads')
+          .select('stage')),
+        scope(supabase
+          .from('leads')
+          .select(`
+            id, score, stage, created_at,
+            contacts(first_name, last_name, title),
+            companies(name)
+          `)
+          .in('stage', ['qualified','meeting_booked','connected'])
+          .order('score', { ascending: false })
+          .limit(10)),
       ]);
 
       const todayCalls = todayCallsRes.data ?? [];
@@ -89,19 +118,62 @@ export function createDashboardRouter({ supabase }: RouterContext): Router {
         meetingRate: s.calls > 0 ? Math.round((s.meetings / s.calls) * 100) : 0,
       })).sort((a, b) => b.meetings - a.meetings);
 
+      const inboundToday = todayCalls.filter((c: any) => c.direction === 'inbound').length;
+      const outboundToday = totalToday - inboundToday;
+
+      // Month cost
+      const monthCost = (monthCostRes.data ?? []).reduce(
+        (sum: number, row: any) => sum + (row.cost_usd ?? 0),
+        0,
+      );
+
+      // Month calls totals
+      const monthCalls = monthCallsRes.data ?? [];
+      const monthInbound = monthCalls.filter((c: any) => c.direction === 'inbound').length;
+      const monthMeetings = monthCalls.filter((c: any) => c.meeting_booked).length;
+
+      // Funnel: count by stage
+      const stageGroups: Record<string, string[]> = {
+        new: ['new', 'enriching', 'enriched', 'phone_lookup_pending', 'callable', 'email_only'],
+        contacted: ['in_call_queue', 'calling', 'called_no_answer', 'called_voicemail', 'called_gatekeeper'],
+        connected: ['connected'],
+        qualified: ['qualified'],
+        meeting: ['meeting_booked', 'meeting_held'],
+        dead: ['disqualified', 'dnc', 'dead'],
+      };
+      const stageCounts: Record<string, number> = {};
+      for (const lead of funnelRes.data ?? []) {
+        const s = (lead as any).stage as string;
+        stageCounts[s] = (stageCounts[s] ?? 0) + 1;
+      }
+      const funnel = Object.entries(stageGroups).map(([bucket, stages]) => ({
+        bucket,
+        count: stages.reduce((sum, s) => sum + (stageCounts[s] ?? 0), 0),
+      }));
+
       res.json({
         today: {
           totalCalls: totalToday,
+          inboundCalls: inboundToday,
+          outboundCalls: outboundToday,
           meetingsBooked: meetingsToday,
           dmReached: dmReachedToday,
           avgDurationSeconds: avgDuration,
           meetingRate: totalToday > 0 ? Math.round((meetingsToday / totalToday) * 100) : 0,
         },
+        thisMonth: {
+          totalCalls: monthCalls.length,
+          inboundCalls: monthInbound,
+          meetingsBooked: monthMeetings,
+          costUsd: Math.round(monthCost * 100) / 100,
+        },
         weekMeetings: (meetingsThisWeekRes.data ?? []).length,
         activeCampaigns: (activeCampaignsRes.data ?? []).length,
         hotLeadsCount: (hotLeadsRes.data ?? []).length,
+        hotLeads: topLeadsRes.data ?? [],
         recentCalls: recentCallsRes.data ?? [],
         agentStats,
+        funnel,
       });
     } catch (err) {
       next(err);
