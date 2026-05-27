@@ -36,15 +36,9 @@ export function createDocsRouter(): Router {
 }
 
 function buildOpenApiSpec() {
-  const std = {
-    BearerAuth: {
-      get: { security: [{ BearerAuth: [] }] },
-    },
-  };
   const ok = (description = 'Success') => ({ 200: { description } });
   const created = { 201: { description: 'Created' } };
   const accepted = { 202: { description: 'Accepted' } };
-  const noContent = { 204: { description: 'No content' } };
   const unauth = { 401: { description: 'Unauthorized' } };
   const errs = { ...unauth, 500: { description: 'Server error' } };
 
