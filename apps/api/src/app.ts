@@ -23,6 +23,7 @@ import { createDncRouter } from './modules/dnc/dnc.router';
 import { createImportsRouter } from './modules/imports/imports.router';
 import { createAuditRouter } from './modules/audit/audit.router';
 import { createDocsRouter } from './modules/docs/docs.router';
+import { createCrmRouter } from './modules/crm/crm.router';
 import { requireApiKey } from './middleware/auth.middleware';
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
@@ -102,6 +103,7 @@ export function createApp(): Application {
   app.use('/api/v1/dnc', createDncRouter(routerCtx));
   app.use('/api/v1/imports', createImportsRouter(routerCtx));
   app.use('/api/v1/audit', createAuditRouter(routerCtx));
+  app.use('/api/v1/crm', createCrmRouter(routerCtx));
 
   // Public docs (no auth)
   app.use('/api/docs', createDocsRouter());

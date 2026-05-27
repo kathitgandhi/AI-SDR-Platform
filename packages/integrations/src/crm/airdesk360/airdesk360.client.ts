@@ -1,192 +1,302 @@
 /**
- * AirDesk360 CRM adapter — STUB.
+ * AirDesk360 CRM adapter — REAL implementation against the Manage-Leads-Pro
+ * style REST API (apidoc at https://airdesk360.com/apiguide/index.html).
  *
- * The documented API at https://airdesk360.com/saas/api/docs is a platform
- * provisioning API (tenants, plans, subscriptions) — NOT a CRM data API.
+ * Key API quirks vs typical REST:
+ *  - Auth header is literally `authtoken: <RAW_KEY>` (no Bearer, no base64).
+ *  - Request bodies are application/x-www-form-urlencoded (not JSON).
+ *  - Mutations return `{ status: bool, message: string, error?: object }`.
+ *  - GETs return naked objects/arrays (no `data` wrapper).
+ *  - DELETE paths use `api/delete/<resource>/:id` (note the `delete/` prefix).
+ *  - Contacts live UNDER a customer: `customer_id` is required.
+ *  - No `/notes` or `/calls` endpoints — we model those as `tasks` with rel_type.
  *
- * The actual CRM endpoints (contacts, deals, tickets, etc.) live on a
- * per-tenant URL like https://<tenant>.airdesk360.com/api/... and the user
- * needs to provide:
- *   - AIRDESK360_BASE_URL  (e.g. https://aisdr.airdesk360.com)
- *   - AIRDESK360_API_KEY   (tenant API key)
- *
- * Once those are confirmed, replace the TODO endpoint paths below with the
- * real ones from the tenant API docs.
+ * Requires (`config`):
+ *   - AIRDESK360_BASE_URL (e.g. https://airbs.airdesk360.com)
+ *   - AIRDESK360_API_KEY  (tenant authtoken)
  */
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import qs from 'querystring';
 import { ICrmAdapter, CrmContact, CrmDeal, CrmNote } from '../crm.interface';
+
+interface MutationResponse {
+  status: boolean;
+  message?: string;
+  error?: Record<string, string>;
+  // Some POSTs include the inserted row id:
+  data?: { id?: string | number } | string | number;
+  id?: string | number;
+}
+
+export interface AirDeskTicketParams {
+  subject: string;
+  description?: string;
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  contactId?: string | number;
+  customerId?: string | number;
+  department?: string | number;
+  userId?: string | number;
+}
+
+export interface AirDeskTaskParams {
+  name: string;
+  description?: string;
+  rel_type: 'lead' | 'customer' | 'project' | 'ticket';
+  rel_id: string | number;
+  startdate?: string;
+  duedate?: string;
+  priority?: number;
+}
 
 export class AirDesk360Adapter implements ICrmAdapter {
   private readonly http: AxiosInstance;
-  private readonly verbose: boolean;
+  private readonly defaultUserId: string;
+  private readonly defaultDepartmentId: string;
 
   constructor(config: Record<string, string>) {
-    const baseUrl = config['AIRDESK360_BASE_URL'] ?? 'https://airdesk360.com';
+    const baseUrl = (config['AIRDESK360_BASE_URL'] ?? '').replace(/\/+$/, '');
     const apiKey = config['AIRDESK360_API_KEY'] ?? '';
-    this.verbose = config['AIRDESK360_DEBUG'] === 'true';
+    this.defaultUserId = config['AIRDESK360_DEFAULT_USER_ID'] ?? '1';
+    this.defaultDepartmentId = config['AIRDESK360_DEFAULT_DEPARTMENT_ID'] ?? '1';
+
+    if (!baseUrl) throw new Error('AIRDESK360_BASE_URL required');
+    if (!apiKey) throw new Error('AIRDESK360_API_KEY required');
 
     this.http = axios.create({
       baseURL: baseUrl,
-      timeout: 15000,
-      headers: {
-        Authorization: apiKey, // AirDesk360 docs show api_key value sent in Authorization header
-        'Content-Type': 'application/json',
-      },
+      timeout: 20000,
+      headers: { authtoken: apiKey },
+      validateStatus: (s) => s < 500, // we want to inspect 4xx ourselves
     });
   }
 
-  private warn(method: string): void {
-    if (this.verbose) {
-      console.warn(`[AirDesk360Adapter.${method}] Endpoint not yet confirmed. Provide the tenant CRM API spec to enable this.`);
-    }
+  // -----------------------------------------------------------------
+  // Internal helpers
+  // -----------------------------------------------------------------
+
+  private async post<T = MutationResponse>(path: string, body: Record<string, unknown>): Promise<AxiosResponse<T>> {
+    const cleaned = Object.fromEntries(
+      Object.entries(body).filter(([_, v]) => v !== undefined && v !== null && v !== ''),
+    );
+    return this.http.post<T>(path, qs.stringify(cleaned as any), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
   }
 
-  /**
-   * Create or update a CRM contact.
-   * TODO: replace `/api/v1/contacts` with the actual tenant endpoint.
-   */
-  async createOrUpdateContact(contact: CrmContact): Promise<string> {
-    this.warn('createOrUpdateContact');
-    try {
-      // Search by email first (typical pattern)
-      if (contact.email) {
-        const search = await this.http.get('/api/v1/contacts', {
-          params: { email: contact.email },
-        }).catch(() => null);
-        const existing = search?.data?.data?.[0] ?? search?.data?.results?.[0];
-        if (existing?.id) {
-          await this.http.put(`/api/v1/contacts/${existing.id}`, this.mapContact(contact));
-          return String(existing.id);
-        }
-      }
-      const res = await this.http.post('/api/v1/contacts', this.mapContact(contact));
-      return String(res.data?.id ?? res.data?.data?.id ?? 'unknown');
-    } catch (err) {
-      this.warn(`createOrUpdateContact failed: ${(err as Error).message}`);
-      return 'error';
-    }
+  private async put<T = MutationResponse>(path: string, body: Record<string, unknown>): Promise<AxiosResponse<T>> {
+    const cleaned = Object.fromEntries(
+      Object.entries(body).filter(([_, v]) => v !== undefined && v !== null && v !== ''),
+    );
+    return this.http.put<T>(path, qs.stringify(cleaned as any), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
   }
 
+  private extractId(resp: MutationResponse): string {
+    if (resp.id != null) return String(resp.id);
+    if (resp.data && typeof resp.data === 'object' && (resp.data as { id?: string | number }).id != null) {
+      return String((resp.data as { id: string | number }).id);
+    }
+    // AirDesk often returns just `{status:true, message:"Added..."}` with no id.
+    // Caller can search by unique field (email/phone) to re-discover the id.
+    return '';
+  }
+
+  // -----------------------------------------------------------------
+  // ICrmAdapter implementation
+  // -----------------------------------------------------------------
+
+  /** Our "company" ↔ AirDesk360 "customer" */
   async createOrUpdateCompany(company: {
     name: string; domain?: string; industry?: string;
     employeeCount?: number; storeCount?: number;
   }): Promise<string> {
-    this.warn('createOrUpdateCompany');
+    // Search by company name first
     try {
-      const res = await this.http.post('/api/v1/companies', {
-        name: company.name,
-        website: company.domain,
-        industry: company.industry,
-        employee_count: company.employeeCount,
-        store_count: company.storeCount,
-      });
-      return String(res.data?.id ?? res.data?.data?.id ?? 'unknown');
-    } catch (err) {
-      this.warn(`createOrUpdateCompany failed: ${(err as Error).message}`);
-      return 'error';
+      const search = await this.http.get(`/api/customers/search/${encodeURIComponent(company.name)}`);
+      const match = Array.isArray(search.data)
+        ? (search.data as Array<{ userid?: string; id?: string }>).find(() => true)
+        : null;
+      if (match && (match.userid || match.id)) {
+        const existingId = String(match.userid ?? match.id);
+        await this.put(`/api/customers/${existingId}`, this.mapCompany(company));
+        return existingId;
+      }
+    } catch {
+      // ignore — fall through to insert
     }
+
+    const res = await this.post(`/api/customers`, this.mapCompany(company));
+    if (!res.data?.status) throw new Error(`AirDesk360 createCustomer failed: ${res.data?.message ?? res.status}`);
+    return this.extractId(res.data);
   }
 
-  async createDeal(deal: CrmDeal): Promise<string> {
-    this.warn('createDeal');
-    try {
-      const res = await this.http.post('/api/v1/deals', {
-        contact_id: deal.contactId,
-        company_id: deal.companyId,
-        name: deal.name,
-        stage: deal.stage,
-        amount: deal.amount,
-        close_date: deal.closeDate,
-        notes: deal.notes,
-        custom: deal.customProperties,
-      });
-      return String(res.data?.id ?? res.data?.data?.id ?? 'unknown');
-    } catch (err) {
-      this.warn(`createDeal failed: ${(err as Error).message}`);
-      return 'error';
+  /** Our "contact" ↔ AirDesk360 "contact" (nested under customer) */
+  async createOrUpdateContact(contact: CrmContact): Promise<string> {
+    if (!contact.companyId) {
+      throw new Error('AirDesk360 contacts require companyId (maps to customer_id)');
     }
-  }
 
-  async updateDealStage(dealId: string, stage: string): Promise<void> {
-    this.warn('updateDealStage');
-    try {
-      await this.http.put(`/api/v1/deals/${dealId}`, { stage });
-    } catch (err) {
-      this.warn(`updateDealStage failed: ${(err as Error).message}`);
+    // Search by email first
+    if (contact.email) {
+      try {
+        const search = await this.http.get(`/api/contacts/search/${encodeURIComponent(contact.email)}`);
+        const match = Array.isArray(search.data)
+          ? (search.data as Array<{ id?: string }>).find(() => true)
+          : null;
+        if (match?.id) {
+          await this.put(`/api/contacts/${match.id}`, this.mapContact(contact));
+          return String(match.id);
+        }
+      } catch {
+        // continue to insert
+      }
     }
-  }
 
-  async addNote(note: CrmNote): Promise<void> {
-    this.warn('addNote');
-    try {
-      await this.http.post('/api/v1/notes', {
-        entity_type: note.entityType,
-        entity_id: note.entityId,
-        body: note.body,
-        created_at: note.timestamp ?? new Date().toISOString(),
-      });
-    } catch (err) {
-      this.warn(`addNote failed: ${(err as Error).message}`);
+    const res = await this.post(`/api/contacts/`, this.mapContact(contact));
+    if (!res.data?.status) {
+      const errMsg = res.data?.error
+        ? JSON.stringify(res.data.error)
+        : res.data?.message ?? `HTTP ${res.status}`;
+      throw new Error(`AirDesk360 createContact failed: ${errMsg}`);
     }
-  }
-
-  async bookMeeting(params: {
-    contactId: string; title: string; startTime: string; endTime: string; description?: string;
-  }): Promise<string> {
-    this.warn('bookMeeting');
-    try {
-      const res = await this.http.post('/api/v1/meetings', {
-        contact_id: params.contactId,
-        title: params.title,
-        start_time: params.startTime,
-        end_time: params.endTime,
-        description: params.description,
-      });
-      return String(res.data?.id ?? res.data?.data?.id ?? 'unknown');
-    } catch (err) {
-      this.warn(`bookMeeting failed: ${(err as Error).message}`);
-      return 'error';
-    }
+    return this.extractId(res.data);
   }
 
   /**
-   * Create a support ticket in AirDesk360.
-   * Not part of ICrmAdapter (yet) — call directly from your ticketing flow.
+   * AirDesk360 has no "deals" entity. The closest analog is **Lead** which has a
+   * status/source/assigned flow. Map our Deal → AirDesk360 Lead.
    */
-  async createTicket(params: {
-    title: string;
-    description?: string;
-    priority?: 'low' | 'medium' | 'high' | 'urgent';
-    contactId?: string;
-    companyId?: string;
+  async createDeal(deal: CrmDeal): Promise<string> {
+    const body: Record<string, unknown> = {
+      name: deal.name,
+      source: 1, // AirDesk source IDs — '1' is usually "Other". Configurable per tenant.
+      status: 1, // AirDesk status IDs — '1' is usually "New". Configurable.
+      assigned: this.defaultUserId,
+      client_id: deal.companyId,
+      description: deal.notes,
+    };
+    const res = await this.post(`/api/leads`, body);
+    if (!res.data?.status) {
+      throw new Error(`AirDesk360 createLead failed: ${res.data?.message ?? res.status}`);
+    }
+    return this.extractId(res.data);
+  }
+
+  /** No status enum mapping in AirDesk360 — depends on tenant's configured lead statuses. */
+  async updateDealStage(dealId: string, stage: string): Promise<void> {
+    // Tenant-specific: `stage` would need to be a numeric status ID.
+    // For now we just write it to `description` so the change is visible.
+    await this.put(`/api/leads/${dealId}`, { description: `Stage updated to: ${stage}` });
+  }
+
+  /** No /notes endpoint — model as a Task with description. */
+  async addNote(note: CrmNote): Promise<void> {
+    const relTypeMap: Record<CrmNote['entityType'], 'customer' | 'lead' | 'project'> = {
+      contact: 'customer', // contacts are nested under customer; attach to that
+      company: 'customer',
+      deal: 'lead',
+    };
+    const body: Record<string, unknown> = {
+      name: note.body.slice(0, 100),
+      description: note.body,
+      rel_type: relTypeMap[note.entityType],
+      rel_id: note.entityId,
+      startdate: new Date(note.timestamp ?? Date.now()).toISOString().slice(0, 10),
+    };
+    await this.post(`/api/tasks`, body);
+  }
+
+  /** Calendar event surrogate for meetings */
+  async bookMeeting(params: {
+    contactId: string; title: string; startTime: string; endTime: string; description?: string;
   }): Promise<string> {
-    this.warn('createTicket');
+    const body = {
+      title: params.title,
+      description: params.description ?? '',
+      start: params.startTime,
+      reminder_before_type: 'minutes',
+      reminder_before: 30,
+      color: '#2196F3',
+      userid: this.defaultUserId,
+      isstartnotified: 0,
+      public: 1,
+    };
+    const res = await this.post(`/api/calendar/`, body);
+    if (!res.data?.status) {
+      throw new Error(`AirDesk360 createCalendar failed: ${res.data?.message ?? res.status}`);
+    }
+    return this.extractId(res.data);
+  }
+
+  /** Create a support ticket. Beyond ICrmAdapter — call directly. */
+  async createTicket(params: AirDeskTicketParams): Promise<string> {
+    if (!params.contactId) throw new Error('AirDesk360 ticket requires contactId');
+
+    const body: Record<string, unknown> = {
+      subject: params.subject,
+      department: params.department ?? this.defaultDepartmentId,
+      contactid: params.contactId,           // note: no underscore (AirDesk quirk)
+      userid: params.userId ?? this.defaultUserId,
+      priority: this.mapTicketPriority(params.priority),
+      message: params.description ?? '',
+    };
+    const res = await this.post(`/api/tickets`, body);
+    if (!res.data?.status) {
+      throw new Error(`AirDesk360 createTicket failed: ${res.data?.message ?? res.status}`);
+    }
+    return this.extractId(res.data);
+  }
+
+  /** Smoke-test the connection (used by /api/v1/crm/health). */
+  async ping(): Promise<{ ok: boolean; detail: string }> {
     try {
-      const res = await this.http.post('/api/v1/tickets', {
-        subject: params.title,
-        description: params.description,
-        priority: params.priority ?? 'medium',
-        contact_id: params.contactId,
-        company_id: params.companyId,
-      });
-      return String(res.data?.id ?? res.data?.data?.id ?? 'unknown');
+      const res = await this.http.get(`/api/customers`);
+      if (res.status === 401 || (res.data as any)?.status === false) {
+        return { ok: false, detail: (res.data as any)?.message ?? `HTTP ${res.status}` };
+      }
+      return { ok: true, detail: `Connected. Returned ${Array.isArray(res.data) ? res.data.length : 0} customers.` };
     } catch (err) {
-      this.warn(`createTicket failed: ${(err as Error).message}`);
-      return 'error';
+      return { ok: false, detail: (err as Error).message };
     }
   }
 
-  private mapContact(c: CrmContact): Record<string, unknown> {
+  // -----------------------------------------------------------------
+  // Field mapping
+  // -----------------------------------------------------------------
+
+  private mapCompany(c: { name: string; domain?: string; employeeCount?: number; storeCount?: number }): Record<string, unknown> {
     return {
-      first_name: c.firstName,
-      last_name: c.lastName,
-      email: c.email,
-      phone: c.phone,
-      title: c.title,
-      company_name: c.companyName,
-      company_id: c.companyId,
-      source: c.source ?? 'AI_SDR',
-      notes: c.notes,
+      company: c.name,
+      website: c.domain,
+      // Defaults required by some Perfex-style schemas
+      default_language: 'english',
+      default_currency: 1,
     };
+  }
+
+  private mapContact(c: CrmContact): Record<string, unknown> {
+    const [first, ...rest] = (c.firstName ?? '').split(' ');
+    return {
+      customer_id: c.companyId,
+      firstname: first ?? c.firstName,
+      lastname: c.lastName ?? rest.join(' ') ?? '',
+      email: c.email,
+      phonenumber: c.phone,
+      title: c.title,
+      is_primary: 'on',
+      donotsendwelcomeemail: 'on',
+    };
+  }
+
+  private mapTicketPriority(p?: 'low' | 'medium' | 'high' | 'urgent'): number {
+    // AirDesk priority IDs (Perfex defaults): 1=Low, 2=Medium, 3=High, 4=Urgent
+    switch (p) {
+      case 'low': return 1;
+      case 'high': return 3;
+      case 'urgent': return 4;
+      case 'medium':
+      default: return 2;
+    }
   }
 }

@@ -15,7 +15,13 @@
       "Bash(git commit -m 'Fix pnpm hoisting in Dockerfiles for TypeScript module resolution *)",
       "Bash(git checkout *)",
       "Bash(git reset *)",
-      "mcp__Claude_in_Chrome__list_connected_browsers"
+      "mcp__Claude_in_Chrome__list_connected_browsers",
+      "Bash(grep -oE \"['\\\\\"][^'\\\\\"]*api_\\(data|project\\)[^'\\\\\"]*['\\\\\"]\" /tmp/airdesk-main.js | sort -u)",
+      "Bash(curl -sL \"https://airdesk360.com/apiguide/api_data.js\" -o /tmp/airdesk-api.js)",
+      "Bash(curl -sL \"https://airdesk360.com/apiguide/api_project.js\" -o /tmp/airdesk-proj.js)",
+      "Bash(cp /tmp/airdesk-api.js /c/tmp/airdesk-api.js)",
+      "Bash(mkdir -p /c/tmp)",
+      "Read(//c/tmp//**)"
     ]
   }
 }
