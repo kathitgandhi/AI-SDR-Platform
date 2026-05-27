@@ -9,7 +9,7 @@ interface RouterContext {
   logger: Logger;
 }
 
-export function createCallsRouter({ supabase, logger: _logger }: RouterContext): Router {
+export function createCallsRouter({ supabase, logger }: RouterContext): Router {
   const router = Router();
 
   // GET /api/v1/calls/meetings — must be before /:id
