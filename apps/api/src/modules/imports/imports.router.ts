@@ -4,6 +4,7 @@ import { Logger } from 'pino';
 import { ValidationError } from '../../shared/errors';
 import { getUserId } from '../../shared/user-scope';
 import { audit } from '../../shared/audit';
+import { enqueueCrmSync } from '../../shared/crm-sync-queue';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -185,7 +186,7 @@ export function createImportsRouter({ supabase, logger }: RouterContext): Router
           }
 
           // 3. Lead
-          const { error: leadErr } = await supabase
+          const { data: newLead, error: leadErr } = await supabase
             .from('leads')
             .insert({
               campaign_id: campaign_id ?? null,
@@ -194,11 +195,16 @@ export function createImportsRouter({ supabase, logger }: RouterContext): Router
               stage: 'new',
               source: row.source ?? 'csv_import',
               created_by: userId ?? null,
-            });
-          if (leadErr) {
-            errors.push({ row: i + 1, message: `Lead insert: ${leadErr.message}` });
+            })
+            .select('id')
+            .single();
+          if (leadErr || !newLead) {
+            errors.push({ row: i + 1, message: `Lead insert: ${leadErr?.message ?? 'unknown'}` });
             continue;
           }
+
+          // Auto-sync to CRM (fire-and-forget)
+          enqueueCrmSync('lead', newLead.id, 'create');
 
           imported++;
         } catch (e) {

@@ -7,6 +7,7 @@ import { createQueues, QUEUE_NAMES } from './queues/queue.registry';
 import { createCallExecutorWorker } from './workers/call-executor.worker';
 import { createTranscriptWorker } from './workers/transcript.worker';
 import { createEmailSenderWorker } from './workers/email-sender.worker';
+import { createCrmSyncWorker } from './workers/crm-sync.worker';
 import { TelnyxCallClient, ElevenLabsAgentClient, ClaudeReasoningService, GmailClient } from '@ai-sdr/integrations';
 import { DncChecker, TimezoneGuard, CallOutcomeScorer } from '@ai-sdr/core';
 
@@ -86,6 +87,20 @@ async function bootstrap(): Promise<void> {
       }));
       logger.info('Email sender worker started');
     }
+  }
+
+  if (workerTypes.includes('crm-sync')) {
+    workers.push(createCrmSyncWorker({
+      supabase,
+      connection: redis,
+      logger,
+      config: {
+        provider: workerEnv.CRM_PROVIDER,
+        airdeskBaseUrl: workerEnv.AIRDESK360_BASE_URL,
+        airdeskApiKey: workerEnv.AIRDESK360_API_KEY,
+      },
+    }));
+    logger.info({ provider: workerEnv.CRM_PROVIDER }, 'CRM sync worker started');
   }
 
   logger.info({ count: workers.length }, 'All workers started');

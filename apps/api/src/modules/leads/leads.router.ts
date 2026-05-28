@@ -3,6 +3,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
 import { NotFoundError, ValidationError } from '../../shared/errors';
 import { getUserId } from '../../shared/user-scope';
+import { enqueueCrmSync } from '../../shared/crm-sync-queue';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -120,6 +121,8 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
 
       if (error || !data) throw new NotFoundError('Lead', req.params.id);
       logger.info({ leadId: req.params.id, stage }, 'Lead stage updated');
+
+      enqueueCrmSync('lead', req.params.id, 'update');
 
       await supabase.from('lead_stage_history').insert({
         lead_id: req.params.id,
