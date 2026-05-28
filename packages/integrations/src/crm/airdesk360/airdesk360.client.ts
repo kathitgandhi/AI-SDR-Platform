@@ -106,29 +106,83 @@ export class AirDesk360Adapter implements ICrmAdapter {
   // ICrmAdapter implementation
   // -----------------------------------------------------------------
 
-  /** Our "company" ↔ AirDesk360 "customer" */
+  /** Our "company" ↔ AirDesk360 "customer". Customer ID field is `userid`. */
   async createOrUpdateCompany(company: {
     name: string; domain?: string; industry?: string;
     employeeCount?: number; storeCount?: number;
   }): Promise<string> {
-    // Search by company name first
-    try {
-      const search = await this.http.get(`/api/customers/search/${encodeURIComponent(company.name)}`);
-      const match = Array.isArray(search.data)
-        ? (search.data as Array<{ userid?: string; id?: string }>).find(() => true)
-        : null;
-      if (match && (match.userid || match.id)) {
-        const existingId = String(match.userid ?? match.id);
-        await this.put(`/api/customers/${existingId}`, this.mapCompany(company));
-        return existingId;
-      }
-    } catch {
-      // ignore — fall through to insert
+    const existingId = await this.findCustomerIdByName(company.name);
+    if (existingId) {
+      await this.put(`/api/customers/${existingId}`, this.mapCompany(company));
+      return existingId;
     }
 
     const res = await this.post(`/api/customers`, this.mapCompany(company));
-    if (!res.data?.status) throw new Error(`AirDesk360 createCustomer failed: ${res.data?.message ?? res.status}`);
-    return this.extractId(res.data);
+    if (!res.data?.status) {
+      throw new Error(`AirDesk360 createCustomer failed: ${res.data?.message ?? res.status}`);
+    }
+
+    // POST returns {status:true, message:"Added"} with no id — search to find it
+    const newId = await this.findCustomerIdByName(company.name);
+    if (!newId) {
+      // AirDesk's search is fuzzy and sometimes can't find what we just inserted.
+      // Don't throw — return empty so the caller knows the row exists but its ID is unresolved.
+      // Downstream contact/lead sync will likely fail or be skipped, and the user can
+      // re-run sync once AirDesk's search catches up (or fix the ID manually).
+      return '';
+    }
+    return newId;
+  }
+
+  /**
+   * Find a customer by name using progressively looser strategies:
+   *  1) exact search by full name (URL-encoded)
+   *  2) search by first 2-3 significant words (strip parens/commas)
+   *  3) keyword-by-keyword scan against any returned rows
+   */
+  private async findCustomerIdByName(name: string): Promise<string | null> {
+    if (!name) return null;
+
+    const tryStrategies: string[] = [];
+    tryStrategies.push(name);
+    // Sanitised: strip parens, brackets, punctuation
+    const sanitised = name.replace(/[()\[\]\.,;:!?]/g, '').replace(/\s+/g, ' ').trim();
+    if (sanitised && sanitised !== name) tryStrategies.push(sanitised);
+    // First 2 significant words
+    const firstTwo = sanitised.split(' ').slice(0, 2).join(' ').trim();
+    if (firstTwo && firstTwo !== sanitised) tryStrategies.push(firstTwo);
+    // Just the first word
+    const firstWord = sanitised.split(' ')[0]?.trim();
+    if (firstWord && firstWord !== firstTwo) tryStrategies.push(firstWord);
+
+    const wanted = name.trim().toLowerCase();
+
+    for (const term of tryStrategies) {
+      try {
+        const res = await this.http.get(`/api/customers/search/${encodeURIComponent(term)}`);
+        if (!Array.isArray(res.data)) continue;
+        type Row = { userid?: string; id?: string; company?: string; datecreated?: string };
+        const rows = res.data as Row[];
+        if (rows.length === 0) continue;
+
+        // 1) exact match on full original name
+        const exact = rows.find((r) => (r.company ?? '').trim().toLowerCase() === wanted);
+        if (exact?.userid ?? exact?.id) return String(exact!.userid ?? exact!.id);
+
+        // 2) prefix/contains match — case-insensitive
+        const contains = rows.find((r) => (r.company ?? '').trim().toLowerCase().includes(wanted));
+        if (contains?.userid ?? contains?.id) return String(contains!.userid ?? contains!.id);
+
+        // 3) if just one row came back, take it
+        if (rows.length === 1) {
+          const only = rows[0]!;
+          return String(only.userid ?? only.id ?? '') || null;
+        }
+      } catch {
+        // try next strategy
+      }
+    }
+    return null;
   }
 
   /** Our "contact" ↔ AirDesk360 "contact" (nested under customer) */
@@ -137,30 +191,40 @@ export class AirDesk360Adapter implements ICrmAdapter {
       throw new Error('AirDesk360 contacts require companyId (maps to customer_id)');
     }
 
-    // Search by email first
-    if (contact.email) {
-      try {
-        const search = await this.http.get(`/api/contacts/search/${encodeURIComponent(contact.email)}`);
-        const match = Array.isArray(search.data)
-          ? (search.data as Array<{ id?: string }>).find(() => true)
-          : null;
-        if (match?.id) {
-          await this.put(`/api/contacts/${match.id}`, this.mapContact(contact));
-          return String(match.id);
-        }
-      } catch {
-        // continue to insert
-      }
+    // Look for existing contact by email under this customer
+    const existing = contact.email
+      ? await this.findContactIdByEmail(String(contact.companyId), contact.email)
+      : null;
+    if (existing) {
+      await this.put(`/api/contacts/${existing}`, this.mapContact(contact));
+      return existing;
     }
 
     const res = await this.post(`/api/contacts/`, this.mapContact(contact));
     if (!res.data?.status) {
-      const errMsg = res.data?.error
-        ? JSON.stringify(res.data.error)
-        : res.data?.message ?? `HTTP ${res.status}`;
+      const errMsg = res.data?.error ? JSON.stringify(res.data.error) : res.data?.message ?? `HTTP ${res.status}`;
       throw new Error(`AirDesk360 createContact failed: ${errMsg}`);
     }
-    return this.extractId(res.data);
+
+    if (contact.email) {
+      const newId = await this.findContactIdByEmail(String(contact.companyId), contact.email);
+      if (newId) return newId;
+    }
+    return ''; // created but ID unresolved
+  }
+
+  private async findContactIdByEmail(customerId: string, email: string): Promise<string | null> {
+    try {
+      // GET /api/contacts/{customer_id} → list contacts for that customer
+      const res = await this.http.get(`/api/contacts/${encodeURIComponent(customerId)}`);
+      if (!Array.isArray(res.data)) return null;
+      type Row = { id?: string; email?: string };
+      const wanted = email.trim().toLowerCase();
+      const match = (res.data as Row[]).find((r) => (r.email ?? '').trim().toLowerCase() === wanted);
+      return match?.id ? String(match.id) : null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -180,7 +244,43 @@ export class AirDesk360Adapter implements ICrmAdapter {
     if (!res.data?.status) {
       throw new Error(`AirDesk360 createLead failed: ${res.data?.message ?? res.status}`);
     }
-    return this.extractId(res.data);
+    // Lead create doesn't return the ID either — search by name to recover it
+    const newId = await this.findLeadIdByName(deal.name);
+    return newId ?? '';
+  }
+
+  private async findLeadIdByName(name: string): Promise<string | null> {
+    if (!name) return null;
+
+    // Build progressively-looser search terms (same idea as customer search)
+    const tryStrategies: string[] = [name];
+    const sanitised = name.replace(/[()\[\]\.,;:!?—–-]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (sanitised && sanitised !== name) tryStrategies.push(sanitised);
+    const firstThree = sanitised.split(' ').slice(0, 3).join(' ').trim();
+    if (firstThree && firstThree !== sanitised) tryStrategies.push(firstThree);
+    const firstWord = sanitised.split(' ')[0]?.trim();
+    if (firstWord && firstWord !== firstThree) tryStrategies.push(firstWord);
+
+    const wanted = name.trim().toLowerCase();
+
+    for (const term of tryStrategies) {
+      try {
+        const res = await this.http.get(`/api/leads/search/${encodeURIComponent(term)}`);
+        if (!Array.isArray(res.data)) continue;
+        type Row = { id?: string; name?: string; dateadded?: string; datecreated?: string };
+        const rows = res.data as Row[];
+        if (rows.length === 0) continue;
+
+        const exact = rows.find((r) => (r.name ?? '').trim().toLowerCase() === wanted);
+        if (exact?.id) return String(exact.id);
+        const contains = rows.find((r) => (r.name ?? '').trim().toLowerCase().includes(wanted.slice(0, 20)));
+        if (contains?.id) return String(contains.id);
+        if (rows.length === 1) return String(rows[0]!.id ?? '') || null;
+      } catch {
+        // try next
+      }
+    }
+    return null;
   }
 
   /** No status enum mapping in AirDesk360 — depends on tenant's configured lead statuses. */
@@ -277,6 +377,9 @@ export class AirDesk360Adapter implements ICrmAdapter {
 
   private mapContact(c: CrmContact): Record<string, unknown> {
     const [first, ...rest] = (c.firstName ?? '').split(' ');
+    // AirDesk requires a password field (treats contacts as portal users).
+    // Generate a random one and disable welcome email so it's never actually used.
+    const randomPassword = `aisdr_${Math.random().toString(36).slice(2)}_${Date.now()}`;
     return {
       customer_id: c.companyId,
       firstname: first ?? c.firstName,
@@ -284,6 +387,7 @@ export class AirDesk360Adapter implements ICrmAdapter {
       email: c.email,
       phonenumber: c.phone,
       title: c.title,
+      password: randomPassword,
       is_primary: 'on',
       donotsendwelcomeemail: 'on',
     };

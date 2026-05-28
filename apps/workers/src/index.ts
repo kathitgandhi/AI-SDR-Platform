@@ -6,7 +6,8 @@ import { workerEnv } from './config/env';
 import { createQueues, QUEUE_NAMES } from './queues/queue.registry';
 import { createCallExecutorWorker } from './workers/call-executor.worker';
 import { createTranscriptWorker } from './workers/transcript.worker';
-import { TelnyxCallClient, ElevenLabsAgentClient, ClaudeReasoningService } from '@ai-sdr/integrations';
+import { createEmailSenderWorker } from './workers/email-sender.worker';
+import { TelnyxCallClient, ElevenLabsAgentClient, ClaudeReasoningService, GmailClient } from '@ai-sdr/integrations';
 import { DncChecker, TimezoneGuard, CallOutcomeScorer } from '@ai-sdr/core';
 
 const logger = pino({ level: workerEnv.LOG_LEVEL });
@@ -57,6 +58,34 @@ async function bootstrap(): Promise<void> {
       connection: redis, logger,
     }));
     logger.info('Transcript worker started');
+  }
+
+  if (workerTypes.includes('email-sender')) {
+    if (!workerEnv.GMAIL_CLIENT_ID || !workerEnv.GMAIL_REFRESH_TOKEN) {
+      logger.warn('email-sender worker requested but Gmail OAuth env vars missing — skipping');
+    } else {
+      const gmailClient = new GmailClient(
+        workerEnv.GMAIL_CLIENT_ID,
+        workerEnv.GMAIL_CLIENT_SECRET,
+        workerEnv.GMAIL_REFRESH_TOKEN,
+        logger,
+      );
+      const claudeService = new ClaudeReasoningService(workerEnv.ANTHROPIC_API_KEY, workerEnv.ANTHROPIC_MODEL, workerEnv.ANTHROPIC_MAX_TOKENS, logger);
+
+      workers.push(createEmailSenderWorker({
+        supabase,
+        gmailClient,
+        claudeService,
+        connection: redis,
+        logger,
+        config: {
+          fromAddress: workerEnv.GMAIL_FROM_ADDRESS,
+          fromName: workerEnv.GMAIL_FROM_NAME,
+          companyName: workerEnv.COMPANY_NAME,
+        },
+      }));
+      logger.info('Email sender worker started');
+    }
   }
 
   logger.info({ count: workers.length }, 'All workers started');
