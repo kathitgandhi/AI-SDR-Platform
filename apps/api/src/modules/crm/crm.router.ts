@@ -59,30 +59,47 @@ export function createCrmRouter({ supabase, logger }: RouterContext): Router {
       const contact = (lead as any).contacts ?? {};
       const company = (lead as any).companies ?? {};
 
-      // 1. customer (company)
-      const customerId = await adapter.createOrUpdateCompany({
-        name: company.name,
-        domain: company.website,
-        employeeCount: company.employee_count ?? undefined,
-        storeCount: company.store_count ?? undefined,
-      });
+      const warnings: string[] = [];
 
-      // 2. contact (linked to customer)
-      let contactCrmId = '';
+      // 1. customer (company)
+      let customerId = '';
       try {
-        contactCrmId = await adapter.createOrUpdateContact({
-          firstName: contact.first_name,
-          lastName: contact.last_name,
-          email: contact.email,
-          phone: contact.phone_direct,
-          title: contact.title,
-          companyId: customerId,
-          companyName: company.name,
-          source: 'AI_SDR',
-          notes: lead.last_call_summary ?? undefined,
+        customerId = await adapter.createOrUpdateCompany({
+          name: company.name,
+          domain: company.website,
+          employeeCount: company.employee_count ?? undefined,
+          storeCount: company.store_count ?? undefined,
         });
+        if (!customerId) {
+          warnings.push('Customer was sent to AirDesk360 but ID could not be resolved (search returned no match)');
+        }
       } catch (e) {
-        logger.warn({ err: (e as Error).message }, 'Contact sync failed but continuing');
+        warnings.push(`Customer sync failed: ${(e as Error).message}`);
+        logger.warn({ err: (e as Error).message }, 'Customer sync failed');
+      }
+
+      // 2. contact (linked to customer) — skip if no customer_id
+      let contactCrmId = '';
+      if (customerId) {
+        try {
+          contactCrmId = await adapter.createOrUpdateContact({
+            firstName: contact.first_name,
+            lastName: contact.last_name,
+            email: contact.email,
+            phone: contact.phone_direct,
+            title: contact.title,
+            companyId: customerId,
+            companyName: company.name,
+            source: 'AI_SDR',
+            notes: lead.last_call_summary ?? undefined,
+          });
+          if (!contactCrmId) warnings.push('Contact sent to AirDesk360 but ID unresolved');
+        } catch (e) {
+          warnings.push(`Contact sync failed: ${(e as Error).message}`);
+          logger.warn({ err: (e as Error).message }, 'Contact sync failed but continuing');
+        }
+      } else {
+        warnings.push('Skipped contact sync (no customer_id)');
       }
 
       // 3. lead (deal in AirDesk parlance)
@@ -95,7 +112,9 @@ export function createCrmRouter({ supabase, logger }: RouterContext): Router {
           stage: lead.stage,
           notes: lead.last_call_summary ?? '',
         });
+        if (!leadCrmId) warnings.push('Lead sent to AirDesk360 but ID unresolved');
       } catch (e) {
+        warnings.push(`Lead sync failed: ${(e as Error).message}`);
         logger.warn({ err: (e as Error).message }, 'Lead sync failed but continuing');
       }
 
@@ -107,13 +126,14 @@ export function createCrmRouter({ supabase, logger }: RouterContext): Router {
       });
 
       res.json({
-        success: true,
+        success: customerId !== '' || warnings.length === 0,
         crm: env.CRM_PROVIDER,
         synced: {
           customer_id: customerId,
           contact_id: contactCrmId,
           lead_id: leadCrmId,
         },
+        warnings,
       });
     } catch (err) {
       next(err);

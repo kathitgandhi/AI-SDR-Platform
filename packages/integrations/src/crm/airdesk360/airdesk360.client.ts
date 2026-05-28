@@ -125,30 +125,64 @@ export class AirDesk360Adapter implements ICrmAdapter {
     // POST returns {status:true, message:"Added"} with no id — search to find it
     const newId = await this.findCustomerIdByName(company.name);
     if (!newId) {
-      throw new Error(`AirDesk360 customer was created but ID could not be resolved by search for "${company.name}"`);
+      // AirDesk's search is fuzzy and sometimes can't find what we just inserted.
+      // Don't throw — return empty so the caller knows the row exists but its ID is unresolved.
+      // Downstream contact/lead sync will likely fail or be skipped, and the user can
+      // re-run sync once AirDesk's search catches up (or fix the ID manually).
+      return '';
     }
     return newId;
   }
 
+  /**
+   * Find a customer by name using progressively looser strategies:
+   *  1) exact search by full name (URL-encoded)
+   *  2) search by first 2-3 significant words (strip parens/commas)
+   *  3) keyword-by-keyword scan against any returned rows
+   */
   private async findCustomerIdByName(name: string): Promise<string | null> {
     if (!name) return null;
-    try {
-      // AirDesk search is broad — pull all matches and find the closest by name equality
-      const search = await this.http.get(`/api/customers/search/${encodeURIComponent(name)}`);
-      if (!Array.isArray(search.data)) return null;
-      type Row = { userid?: string; id?: string; company?: string; datecreated?: string };
-      const rows = search.data as Row[];
 
-      // Prefer exact (trimmed, case-insensitive) match. Fall back to newest match.
-      const wanted = name.trim().toLowerCase();
-      const exact = rows.find((r) => (r.company ?? '').trim().toLowerCase() === wanted);
-      const pick = exact ?? rows.sort((a, b) =>
-        (b.datecreated ?? '').localeCompare(a.datecreated ?? ''),
-      )[0];
-      return pick ? String(pick.userid ?? pick.id ?? '') || null : null;
-    } catch {
-      return null;
+    const tryStrategies: string[] = [];
+    tryStrategies.push(name);
+    // Sanitised: strip parens, brackets, punctuation
+    const sanitised = name.replace(/[()\[\]\.,;:!?]/g, '').replace(/\s+/g, ' ').trim();
+    if (sanitised && sanitised !== name) tryStrategies.push(sanitised);
+    // First 2 significant words
+    const firstTwo = sanitised.split(' ').slice(0, 2).join(' ').trim();
+    if (firstTwo && firstTwo !== sanitised) tryStrategies.push(firstTwo);
+    // Just the first word
+    const firstWord = sanitised.split(' ')[0]?.trim();
+    if (firstWord && firstWord !== firstTwo) tryStrategies.push(firstWord);
+
+    const wanted = name.trim().toLowerCase();
+
+    for (const term of tryStrategies) {
+      try {
+        const res = await this.http.get(`/api/customers/search/${encodeURIComponent(term)}`);
+        if (!Array.isArray(res.data)) continue;
+        type Row = { userid?: string; id?: string; company?: string; datecreated?: string };
+        const rows = res.data as Row[];
+        if (rows.length === 0) continue;
+
+        // 1) exact match on full original name
+        const exact = rows.find((r) => (r.company ?? '').trim().toLowerCase() === wanted);
+        if (exact?.userid ?? exact?.id) return String(exact!.userid ?? exact!.id);
+
+        // 2) prefix/contains match — case-insensitive
+        const contains = rows.find((r) => (r.company ?? '').trim().toLowerCase().includes(wanted));
+        if (contains?.userid ?? contains?.id) return String(contains!.userid ?? contains!.id);
+
+        // 3) if just one row came back, take it
+        if (rows.length === 1) {
+          const only = rows[0]!;
+          return String(only.userid ?? only.id ?? '') || null;
+        }
+      } catch {
+        // try next strategy
+      }
     }
+    return null;
   }
 
   /** Our "contact" ↔ AirDesk360 "contact" (nested under customer) */
