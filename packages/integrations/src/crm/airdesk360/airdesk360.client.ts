@@ -251,20 +251,36 @@ export class AirDesk360Adapter implements ICrmAdapter {
 
   private async findLeadIdByName(name: string): Promise<string | null> {
     if (!name) return null;
-    try {
-      const res = await this.http.get(`/api/leads/search/${encodeURIComponent(name)}`);
-      if (!Array.isArray(res.data)) return null;
-      type Row = { id?: string; name?: string; dateadded?: string; datecreated?: string };
-      const wanted = name.trim().toLowerCase();
-      const rows = res.data as Row[];
-      const exact = rows.find((r) => (r.name ?? '').trim().toLowerCase() === wanted);
-      const pick = exact ?? rows.sort((a, b) =>
-        (b.dateadded ?? b.datecreated ?? '').localeCompare(a.dateadded ?? a.datecreated ?? ''),
-      )[0];
-      return pick?.id ? String(pick.id) : null;
-    } catch {
-      return null;
+
+    // Build progressively-looser search terms (same idea as customer search)
+    const tryStrategies: string[] = [name];
+    const sanitised = name.replace(/[()\[\]\.,;:!?—–-]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (sanitised && sanitised !== name) tryStrategies.push(sanitised);
+    const firstThree = sanitised.split(' ').slice(0, 3).join(' ').trim();
+    if (firstThree && firstThree !== sanitised) tryStrategies.push(firstThree);
+    const firstWord = sanitised.split(' ')[0]?.trim();
+    if (firstWord && firstWord !== firstThree) tryStrategies.push(firstWord);
+
+    const wanted = name.trim().toLowerCase();
+
+    for (const term of tryStrategies) {
+      try {
+        const res = await this.http.get(`/api/leads/search/${encodeURIComponent(term)}`);
+        if (!Array.isArray(res.data)) continue;
+        type Row = { id?: string; name?: string; dateadded?: string; datecreated?: string };
+        const rows = res.data as Row[];
+        if (rows.length === 0) continue;
+
+        const exact = rows.find((r) => (r.name ?? '').trim().toLowerCase() === wanted);
+        if (exact?.id) return String(exact.id);
+        const contains = rows.find((r) => (r.name ?? '').trim().toLowerCase().includes(wanted.slice(0, 20)));
+        if (contains?.id) return String(contains.id);
+        if (rows.length === 1) return String(rows[0]!.id ?? '') || null;
+      } catch {
+        // try next
+      }
     }
+    return null;
   }
 
   /** No status enum mapping in AirDesk360 — depends on tenant's configured lead statuses. */
@@ -361,6 +377,9 @@ export class AirDesk360Adapter implements ICrmAdapter {
 
   private mapContact(c: CrmContact): Record<string, unknown> {
     const [first, ...rest] = (c.firstName ?? '').split(' ');
+    // AirDesk requires a password field (treats contacts as portal users).
+    // Generate a random one and disable welcome email so it's never actually used.
+    const randomPassword = `aisdr_${Math.random().toString(36).slice(2)}_${Date.now()}`;
     return {
       customer_id: c.companyId,
       firstname: first ?? c.firstName,
@@ -368,6 +387,7 @@ export class AirDesk360Adapter implements ICrmAdapter {
       email: c.email,
       phonenumber: c.phone,
       title: c.title,
+      password: randomPassword,
       is_primary: 'on',
       donotsendwelcomeemail: 'on',
     };
