@@ -47,3 +47,5 @@ coverage/
 
 # TypeScript
 *.tsbuildinfo
+secrets/
+*.client_secret*.json
