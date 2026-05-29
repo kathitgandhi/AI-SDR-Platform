@@ -17,10 +17,10 @@ interface CrmSyncDeps {
   logger: Logger;
   config: {
     provider: string;
-    airdeskBaseUrl?: string;
-    airdeskApiKey?: string;
-    airdeskDefaultUserId?: string;
-    airdeskDefaultDepartmentId?: string;
+    airdeskBaseUrl?: string | undefined;
+    airdeskApiKey?: string | undefined;
+    airdeskDefaultUserId?: string | undefined;
+    airdeskDefaultDepartmentId?: string | undefined;
   };
 }
 
@@ -142,7 +142,7 @@ async function syncLead(
 
 async function syncTicket(
   supabase: SupabaseClient,
-  adapter: AirDesk360Adapter,
+  _adapter: AirDesk360Adapter,
   ticketId: string,
   logger: Logger,
 ): Promise<{ crm_ticket_id: string }> {
