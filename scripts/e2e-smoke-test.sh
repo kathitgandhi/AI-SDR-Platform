@@ -95,24 +95,33 @@ skip() {
   SKIP=$((SKIP + 1))
 }
 
-# Returns just the response body. Stores HTTP status in $LAST_STATUS.
-LAST_STATUS=
+# Returns just the response body on stdout. Stores HTTP status in the file
+# /tmp/.e2e-status, read back via $LAST_STATUS (a function-like alias below).
+#
+# IMPORTANT: api() is always invoked as `resp=$(api ...)`, which runs it in a
+# command-substitution SUBSHELL. A plain shell-variable assignment inside that
+# subshell is lost when it exits — which silently blanked the status code and
+# made every assert_status fail even though the app was returning 200s. Files
+# survive the subshell, so we persist the code to /tmp/.e2e-status instead.
 api() {
   local method="$1"
   local path="$2"
   local body="${3:-}"
-  local resp
+  local code
   if [[ -n "$body" ]]; then
-    resp=$(curl -s -o /tmp/.e2e-body -w "%{http_code}" -X "$method" \
+    code=$(curl -s -o /tmp/.e2e-body -w "%{http_code}" -X "$method" \
       -H "$H" -H "Content-Type: application/json" \
       -d "$body" "$BASE_URL$path")
   else
-    resp=$(curl -s -o /tmp/.e2e-body -w "%{http_code}" -X "$method" \
+    code=$(curl -s -o /tmp/.e2e-body -w "%{http_code}" -X "$method" \
       -H "$H" "$BASE_URL$path")
   fi
-  LAST_STATUS="$resp"
+  echo "$code" > /tmp/.e2e-status
   cat /tmp/.e2e-body
 }
+
+# Reads the status code persisted by the most recent api() call.
+LAST_STATUS() { cat /tmp/.e2e-status 2>/dev/null; }
 
 json_extract() {
   python3 -c "import sys,json
@@ -154,7 +163,7 @@ status=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/v1/leads")
 assert_status "401 without auth" "$status" "401"
 
 resp=$(api GET /api/v1/leads)
-assert_status "200 with x-api-key" "$LAST_STATUS" "200"
+assert_status "200 with x-api-key" "$(LAST_STATUS)" "200"
 
 # ────────────────────────────────────────────────────────────────────
 # 2b. ROOT-CAUSE DIAGNOSTIC
@@ -201,7 +210,7 @@ echo -e "    • Mixed    → see each body above."
 log_section "3. Dashboard / KPIs"
 
 resp=$(api GET /api/v1/dashboard/)
-assert_status "GET /api/v1/dashboard/" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/dashboard/" "$(LAST_STATUS)" "200"
 assert_contains "Today block present" "$resp" "\"today\""
 assert_contains "This-month block present" "$resp" "\"thisMonth\""
 assert_contains "Inbound/outbound split" "$resp" "\"inboundCalls\""
@@ -234,7 +243,7 @@ import_body=$(cat <<EOF
 EOF
 )
 resp=$(api POST /api/v1/imports/leads "$import_body")
-assert_status "POST /api/v1/imports/leads" "$LAST_STATUS" "200"
+assert_status "POST /api/v1/imports/leads" "$(LAST_STATUS)" "200"
 assert_contains "imported >= 1" "$resp" "\"imported\":1"
 IMPORT_ID=$(echo "$resp" | json_extract import_id)
 echo "  import id: $IMPORT_ID"
@@ -245,7 +254,7 @@ echo "  import id: $IMPORT_ID"
 log_section "5. Leads"
 
 resp=$(api GET "/api/v1/leads?company=E2E%20Test")
-assert_status "GET /api/v1/leads (filtered)" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/leads (filtered)" "$(LAST_STATUS)" "200"
 LEAD_ID=$(echo "$resp" | python3 -c "import sys,json;l=json.load(sys.stdin)['leads'];print(l[0]['id'] if l else '')")
 if [[ -z "$LEAD_ID" ]]; then
   echo -e "  ${RED}✗${NC} could not find imported lead"
@@ -256,17 +265,17 @@ else
 fi
 
 resp=$(api GET "/api/v1/leads/$LEAD_ID")
-assert_status "GET /api/v1/leads/:id" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/leads/:id" "$(LAST_STATUS)" "200"
 assert_contains "Lead detail has contacts" "$resp" "\"contacts\":"
 assert_contains "Lead detail has companies" "$resp" "\"companies\":"
 
 # Update stage
 resp=$(api PATCH "/api/v1/leads/$LEAD_ID/stage" '{"stage":"qualified","reason":"e2e test"}')
-assert_status "PATCH /api/v1/leads/:id/stage" "$LAST_STATUS" "200"
+assert_status "PATCH /api/v1/leads/:id/stage" "$(LAST_STATUS)" "200"
 
 # Bulk update
 resp=$(api POST /api/v1/leads/bulk-update "{\"lead_ids\":[\"$LEAD_ID\"],\"updates\":{\"score\":85}}")
-assert_status "POST /api/v1/leads/bulk-update" "$LAST_STATUS" "200"
+assert_status "POST /api/v1/leads/bulk-update" "$(LAST_STATUS)" "200"
 
 # ────────────────────────────────────────────────────────────────────
 # 6. NOTES
@@ -274,11 +283,11 @@ assert_status "POST /api/v1/leads/bulk-update" "$LAST_STATUS" "200"
 log_section "6. Notes"
 
 resp=$(api POST /api/v1/notes "{\"lead_id\":\"$LEAD_ID\",\"body\":\"E2E test note created at $(date)\"}")
-assert_status "POST /api/v1/notes" "$LAST_STATUS" "201"
+assert_status "POST /api/v1/notes" "$(LAST_STATUS)" "201"
 NOTE_ID=$(echo "$resp" | json_extract note.id)
 
 resp=$(api GET "/api/v1/notes?lead_id=$LEAD_ID")
-assert_status "GET /api/v1/notes?lead_id=" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/notes?lead_id=" "$(LAST_STATUS)" "200"
 assert_contains "Note in list" "$resp" "\"id\":\"$NOTE_ID\""
 
 # ────────────────────────────────────────────────────────────────────
@@ -287,14 +296,14 @@ assert_contains "Note in list" "$resp" "\"id\":\"$NOTE_ID\""
 log_section "7. Tickets"
 
 resp=$(api POST /api/v1/tickets "{\"title\":\"E2E Test Ticket\",\"description\":\"Created by smoke test\",\"priority\":\"high\",\"lead_id\":\"$LEAD_ID\"}")
-assert_status "POST /api/v1/tickets" "$LAST_STATUS" "201"
+assert_status "POST /api/v1/tickets" "$(LAST_STATUS)" "201"
 TICKET_ID=$(echo "$resp" | json_extract ticket.id)
 
 resp=$(api PATCH "/api/v1/tickets/$TICKET_ID" '{"status":"in_progress"}')
-assert_status "PATCH /api/v1/tickets/:id" "$LAST_STATUS" "200"
+assert_status "PATCH /api/v1/tickets/:id" "$(LAST_STATUS)" "200"
 
 resp=$(api GET "/api/v1/tickets?status=in_progress")
-assert_status "GET /api/v1/tickets?status=" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/tickets?status=" "$(LAST_STATUS)" "200"
 
 # ────────────────────────────────────────────────────────────────────
 # 8. EMAIL PREVIEW + SEND
@@ -307,18 +316,18 @@ contact_id=$(api GET "/api/v1/leads/$LEAD_ID" | python3 -c "import sys,json;prin
 # Actually simpler: just update the contact via raw SQL would require service key. Skip and just trigger send.
 
 resp=$(api POST /api/v1/emails/preview "{\"lead_id\":\"$LEAD_ID\",\"template\":\"follow_up\"}")
-assert_status "POST /api/v1/emails/preview (Claude generates)" "$LAST_STATUS" "200"
+assert_status "POST /api/v1/emails/preview (Claude generates)" "$(LAST_STATUS)" "200"
 assert_contains "Preview has subject" "$resp" "\"subject\":"
 assert_contains "Preview has body_text" "$resp" "\"body_text\":"
 
 resp=$(api POST /api/v1/emails/send "{\"lead_id\":\"$LEAD_ID\",\"template\":\"follow_up\"}")
-assert_status "POST /api/v1/emails/send (queued)" "$LAST_STATUS" "202"
+assert_status "POST /api/v1/emails/send (queued)" "$(LAST_STATUS)" "202"
 assert_contains "Gmail configured" "$resp" "\"gmail_configured\":true"
 
 # Wait a moment then check the emails table
 sleep 8
 resp=$(api GET "/api/v1/emails?lead_id=$LEAD_ID")
-assert_status "GET /api/v1/emails (sent record)" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/emails (sent record)" "$(LAST_STATUS)" "200"
 assert_contains "Email row persisted" "$resp" "\"status\":\"sent\""
 
 # ────────────────────────────────────────────────────────────────────
@@ -327,10 +336,10 @@ assert_contains "Email row persisted" "$resp" "\"status\":\"sent\""
 log_section "9. SMS (queue test — actual send needs Telnyx)"
 
 resp=$(api GET /api/v1/sms/threads)
-assert_status "GET /api/v1/sms/threads" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/sms/threads" "$(LAST_STATUS)" "200"
 
 resp=$(api GET "/api/v1/sms?contact_id=$contact_id")
-assert_status "GET /api/v1/sms?contact_id=" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/sms?contact_id=" "$(LAST_STATUS)" "200"
 
 # Skip POST send — Telnyx not connected
 skip "POST /api/v1/sms/send (Telnyx pending)"
@@ -341,7 +350,7 @@ skip "POST /api/v1/sms/send (Telnyx pending)"
 log_section "10. Settings"
 
 resp=$(api GET /api/v1/settings)
-assert_status "GET /api/v1/settings" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/settings" "$(LAST_STATUS)" "200"
 assert_contains "company_profile" "$resp" "\"company_profile\""
 assert_contains "business_hours" "$resp" "\"business_hours\""
 
@@ -354,10 +363,10 @@ skip "PUT /api/v1/settings/:key (needs JWT auth path; covered by frontend)"
 log_section "11. DNC management"
 
 resp=$(api GET /api/v1/dnc)
-assert_status "GET /api/v1/dnc" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/dnc" "$(LAST_STATUS)" "200"
 
 resp=$(api POST /api/v1/dnc "{\"phone\":\"+15125550199\",\"reason\":\"e2e test\"}")
-assert_status "POST /api/v1/dnc" "$LAST_STATUS" "201"
+assert_status "POST /api/v1/dnc" "$(LAST_STATUS)" "201"
 DNC_ID=$(echo "$resp" | json_extract entry.id)
 [[ -n "$DNC_ID" ]] && api DELETE "/api/v1/dnc/$DNC_ID" > /dev/null
 
@@ -367,11 +376,11 @@ DNC_ID=$(echo "$resp" | json_extract entry.id)
 log_section "12. Transfer rules"
 
 resp=$(api POST /api/v1/transfer-rules "{\"name\":\"E2E Test Rule\",\"trigger\":\"qualification_threshold\",\"conditions\":{\"min_qualification_score\":80},\"transfer_to_number\":\"+15125550100\"}")
-assert_status "POST /api/v1/transfer-rules" "$LAST_STATUS" "201"
+assert_status "POST /api/v1/transfer-rules" "$(LAST_STATUS)" "201"
 RULE_ID=$(echo "$resp" | json_extract rule.id)
 
 resp=$(api GET /api/v1/transfer-rules)
-assert_status "GET /api/v1/transfer-rules" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/transfer-rules" "$(LAST_STATUS)" "200"
 
 [[ -n "$RULE_ID" ]] && api DELETE "/api/v1/transfer-rules/$RULE_ID" > /dev/null
 
@@ -381,11 +390,11 @@ assert_status "GET /api/v1/transfer-rules" "$LAST_STATUS" "200"
 log_section "13. CRM sync to AirDesk360"
 
 resp=$(api GET /api/v1/crm/health)
-assert_status "GET /api/v1/crm/health" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/crm/health" "$(LAST_STATUS)" "200"
 assert_contains "AirDesk connected" "$resp" "\"ok\":true"
 
 resp=$(api POST "/api/v1/crm/sync/lead/$LEAD_ID")
-assert_status "POST /api/v1/crm/sync/lead/:id" "$LAST_STATUS" "200"
+assert_status "POST /api/v1/crm/sync/lead/:id" "$(LAST_STATUS)" "200"
 assert_contains "Customer synced" "$resp" "\"customer_id\":\""
 
 # ────────────────────────────────────────────────────────────────────
@@ -404,7 +413,7 @@ done
 log_section "15. Audit log"
 
 resp=$(api GET /api/v1/audit)
-assert_status "GET /api/v1/audit" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/audit" "$(LAST_STATUS)" "200"
 
 # ────────────────────────────────────────────────────────────────────
 # 16. QUEUES
@@ -412,7 +421,7 @@ assert_status "GET /api/v1/audit" "$LAST_STATUS" "200"
 log_section "16. Queues"
 
 resp=$(api GET /api/v1/queues/)
-assert_status "GET /api/v1/queues/" "$LAST_STATUS" "200"
+assert_status "GET /api/v1/queues/" "$(LAST_STATUS)" "200"
 assert_contains "callExecute queue listed" "$resp" "callExecute"
 
 # ────────────────────────────────────────────────────────────────────
