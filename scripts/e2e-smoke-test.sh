@@ -63,8 +63,15 @@ assert_status() {
     PASS=$((PASS + 1))
   else
     echo -e "  ${RED}✗${NC} $name (HTTP $got, wanted $want)"
+    # Print the actual response body so we know WHY it failed.
+    # 404 => route not registered (stale image). 500 => exception (often missing table).
+    if [[ -f /tmp/.e2e-body ]]; then
+      local snippet
+      snippet=$(head -c 300 /tmp/.e2e-body)
+      [[ -n "$snippet" ]] && echo -e "      ${YELLOW}body:${NC} $snippet"
+    fi
     FAIL=$((FAIL + 1))
-    FAILURES+=("$name")
+    FAILURES+=("$name (HTTP $got)")
   fi
 }
 
@@ -148,6 +155,45 @@ assert_status "401 without auth" "$status" "401"
 
 resp=$(api GET /api/v1/leads)
 assert_status "200 with x-api-key" "$LAST_STATUS" "200"
+
+# ────────────────────────────────────────────────────────────────────
+# 2b. ROOT-CAUSE DIAGNOSTIC
+# One-shot probe of the endpoints that have been failing, printing the
+# raw status + body so we can tell stale-image (404) from missing-table (500).
+# ────────────────────────────────────────────────────────────────────
+log_section "2b. Root-cause diagnostic"
+
+diag() {
+  local path="$1"
+  local code
+  code=$(curl -s -o /tmp/.diag-body -w "%{http_code}" -H "$H" "$BASE_URL$path")
+  local body
+  body=$(head -c 200 /tmp/.diag-body)
+  local verdict
+  case "$code" in
+    200|201|202) verdict="${GREEN}OK${NC}" ;;
+    404)         verdict="${RED}404 → ROUTE MISSING (API image is stale, rebuild needed)${NC}" ;;
+    500)         verdict="${RED}500 → SERVER ERROR (likely missing DB table — run migrations 006/007)${NC}" ;;
+    401)         verdict="${RED}401 → AUTH (api key mismatch)${NC}" ;;
+    *)           verdict="${YELLOW}$code${NC}" ;;
+  esac
+  echo -e "  $path → $(echo -e "$verdict")"
+  [[ "$code" != "200" && -n "$body" ]] && echo -e "      body: $body"
+}
+
+diag /api/v1/settings
+diag /api/v1/notes?lead_id=00000000-0000-0000-0000-000000000000
+diag /api/v1/tickets
+diag /api/v1/dnc
+diag /api/v1/transfer-rules
+diag /api/v1/audit
+diag /api/v1/emails?lead_id=00000000-0000-0000-0000-000000000000
+
+echo
+echo -e "  ${BLUE}Interpretation:${NC}"
+echo -e "    • All 404  → API container running OLD image. Rebuild: sudo docker compose build --no-cache api && sudo docker compose up -d --force-recreate api"
+echo -e "    • All 500  → migrations 006 + 007 not applied in Supabase. Run them in SQL Editor."
+echo -e "    • Mixed    → see each body above."
 
 # ────────────────────────────────────────────────────────────────────
 # 3. DASHBOARD
