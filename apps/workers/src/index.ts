@@ -8,7 +8,8 @@ import { createCallExecutorWorker } from './workers/call-executor.worker';
 import { createTranscriptWorker } from './workers/transcript.worker';
 import { createEmailSenderWorker } from './workers/email-sender.worker';
 import { createCrmSyncWorker } from './workers/crm-sync.worker';
-import { TelnyxCallClient, ElevenLabsAgentClient, ClaudeReasoningService, GmailClient } from '@ai-sdr/integrations';
+import { createLeadImportWorker } from './workers/lead-import.worker';
+import { TelnyxCallClient, ElevenLabsAgentClient, ClaudeReasoningService, GmailClient, ZoomInfoClient } from '@ai-sdr/integrations';
 import { DncChecker, TimezoneGuard, CallOutcomeScorer } from '@ai-sdr/core';
 
 const logger = pino({ level: workerEnv.LOG_LEVEL });
@@ -101,6 +102,29 @@ async function bootstrap(): Promise<void> {
       },
     }));
     logger.info({ provider: workerEnv.CRM_PROVIDER }, 'CRM sync worker started');
+  }
+
+  if (workerTypes.includes('lead-import')) {
+    if (!workerEnv.ZOOMINFO_CLIENT_ID || !workerEnv.ZOOMINFO_CLIENT_SECRET) {
+      logger.warn('lead-import worker requested but ZOOMINFO_CLIENT_ID / ZOOMINFO_CLIENT_SECRET missing — skipping');
+    } else {
+      const zoomInfoClient = new ZoomInfoClient({
+        clientId: workerEnv.ZOOMINFO_CLIENT_ID,
+        clientSecret: workerEnv.ZOOMINFO_CLIENT_SECRET,
+        baseUrl: workerEnv.ZOOMINFO_BASE_URL,
+        rateLimitRpm: workerEnv.ZOOMINFO_RATE_LIMIT_RPM,
+        logger,
+      });
+      workers.push(createLeadImportWorker({
+        supabase,
+        zoomInfoClient,
+        enrichmentQueue: queues[QUEUE_NAMES.ENRICHMENT],
+        leadImportQueue: queues[QUEUE_NAMES.LEAD_IMPORT],
+        connection: redis,
+        logger,
+      }));
+      logger.info('Lead import worker started');
+    }
   }
 
   logger.info({ count: workers.length }, 'All workers started');

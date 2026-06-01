@@ -7,6 +7,11 @@ const workerEnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   REDIS_URL: z.string().min(1),
 
+  ZOOMINFO_CLIENT_ID: z.string().optional(),
+  ZOOMINFO_CLIENT_SECRET: z.string().optional(),
+  ZOOMINFO_BASE_URL: z.string().url().default('https://api.zoominfo.com/lookup'),
+  ZOOMINFO_RATE_LIMIT_RPM: z.coerce.number().default(100),
+
   TELNYX_API_KEY: z.string().min(1),
   TELNYX_BASE_URL: z.string().url().default('https://api.telnyx.com/v2'),
   TELNYX_CONNECTION_ID: z.string().min(1),
