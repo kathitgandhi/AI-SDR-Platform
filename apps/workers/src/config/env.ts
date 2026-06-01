@@ -41,6 +41,17 @@ const workerEnvSchema = z.object({
   GMAIL_FROM_NAME: z.string().default('AI SDR'),
   GMAIL_CC_HOT_LEADS: z.string().optional(),
 
+  // ZoomInfo lead source. Supports both auth methods — provide ONE set:
+  //  (a) Basic:  ZOOMINFO_USERNAME + ZOOMINFO_PASSWORD
+  //  (b) PKI:    ZOOMINFO_CLIENT_ID + ZOOMINFO_USERNAME + ZOOMINFO_PRIVATE_KEY (PEM)
+  // The lead-import worker only starts if a usable combination is present.
+  ZOOMINFO_USERNAME: z.string().optional(),
+  ZOOMINFO_PASSWORD: z.string().optional(),
+  ZOOMINFO_CLIENT_ID: z.string().optional(),
+  ZOOMINFO_PRIVATE_KEY: z.string().optional(),
+  ZOOMINFO_BASE_URL: z.string().url().default('https://api.zoominfo.com'),
+  ZOOMINFO_RATE_LIMIT_RPM: z.coerce.number().default(60),
+
   CRM_PROVIDER: z.enum(['hubspot', 'salesforce', 'pipedrive', 'zoho', 'airdesk360', 'none']).default('none'),
   AIRDESK360_BASE_URL: z.string().optional(),
   AIRDESK360_API_KEY: z.string().optional(),

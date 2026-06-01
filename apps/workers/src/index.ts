@@ -8,7 +8,8 @@ import { createCallExecutorWorker } from './workers/call-executor.worker';
 import { createTranscriptWorker } from './workers/transcript.worker';
 import { createEmailSenderWorker } from './workers/email-sender.worker';
 import { createCrmSyncWorker } from './workers/crm-sync.worker';
-import { TelnyxCallClient, ElevenLabsAgentClient, ClaudeReasoningService, GmailClient } from '@ai-sdr/integrations';
+import { createLeadImportWorker } from './workers/lead-import.worker';
+import { TelnyxCallClient, ElevenLabsAgentClient, ClaudeReasoningService, GmailClient, ZoomInfoClient } from '@ai-sdr/integrations';
 import { DncChecker, TimezoneGuard, CallOutcomeScorer } from '@ai-sdr/core';
 
 const logger = pino({ level: workerEnv.LOG_LEVEL });
@@ -101,6 +102,37 @@ async function bootstrap(): Promise<void> {
       },
     }));
     logger.info({ provider: workerEnv.CRM_PROVIDER }, 'CRM sync worker started');
+  }
+
+  if (workerTypes.includes('lead-import')) {
+    // Accept either basic (username+password) or PKI (clientId+username+privateKey) creds.
+    const hasBasic = !!workerEnv.ZOOMINFO_USERNAME && !!workerEnv.ZOOMINFO_PASSWORD;
+    const hasPki = !!workerEnv.ZOOMINFO_CLIENT_ID && !!workerEnv.ZOOMINFO_USERNAME && !!workerEnv.ZOOMINFO_PRIVATE_KEY;
+    if (!hasBasic && !hasPki) {
+      logger.warn('lead-import worker requested but ZoomInfo credentials missing — skipping');
+    } else {
+      // NOTE: the current ZoomInfoClient uses username/password auth. PKI support
+      // (signing a JWT with ZOOMINFO_PRIVATE_KEY) will be added once the auth
+      // method is confirmed; for now we pass username/password through.
+      const zoomInfoClient = new ZoomInfoClient({
+        clientId: workerEnv.ZOOMINFO_USERNAME ?? workerEnv.ZOOMINFO_CLIENT_ID ?? '',
+        clientSecret: workerEnv.ZOOMINFO_PASSWORD ?? '',
+        baseUrl: workerEnv.ZOOMINFO_BASE_URL,
+        rateLimitRpm: workerEnv.ZOOMINFO_RATE_LIMIT_RPM,
+        logger,
+      });
+
+      workers.push(createLeadImportWorker({
+        supabase,
+        zoomInfoClient,
+        connection: redis,
+        logger,
+        crmSyncQueue: queues[QUEUE_NAMES.CRM_SYNC],
+        phoneLookupQueue: queues[QUEUE_NAMES.PHONE_LOOKUP],
+        leadImportQueue: queues[QUEUE_NAMES.LEAD_IMPORT],
+      }));
+      logger.info({ auth: hasPki ? 'pki' : 'basic' }, 'Lead import (ZoomInfo) worker started');
+    }
   }
 
   logger.info({ count: workers.length }, 'All workers started');
