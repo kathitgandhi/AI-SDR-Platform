@@ -36,6 +36,16 @@ export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
 
       if (!call || !lead) throw new Error(`Missing data for callId=${callId}`);
 
+      // Idempotency guard: the post-call webhook enqueues transcript processing
+      // the moment the call ends, while the call-executor schedules a delayed
+      // fallback job for the same call. Whichever runs first sets the call to
+      // 'completed'; the other must no-op to avoid duplicate transcripts,
+      // appointments, notes, and sequence enrollments.
+      if (call.status === 'completed') {
+        workerLogger.info('Call already processed — skipping (idempotency guard)');
+        return { skipped: true, reason: 'already_completed' };
+      }
+
       const contact = (lead as unknown as { contacts: Record<string, string> }).contacts;
       const company = (lead as unknown as { companies: Record<string, string | number> }).companies;
 

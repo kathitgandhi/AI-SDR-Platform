@@ -129,7 +129,14 @@ export function createCallExecutorWorker(deps: CallExecutorDeps): Worker {
             leadId,
             conversationId: elCall.conversation_id,
           } satisfies TranscriptProcessJobPayload,
-          { delay: config.maxDurationSeconds * 1000 + 30000 }
+          // Delayed fallback: if the ElevenLabs post-call webhook never fires (or
+          // can't enqueue), this still drives post-call processing. Shares a
+          // deterministic jobId with the webhook-enqueued job so the two collapse
+          // into one while either is still queued (BullMQ ignores a duplicate id).
+          {
+            jobId: `transcript:${elCall.conversation_id}`,
+            delay: config.maxDurationSeconds * 1000 + 30000,
+          }
         );
 
         workerLogger.info({ conversationId: elCall.conversation_id }, 'Call initiated');
