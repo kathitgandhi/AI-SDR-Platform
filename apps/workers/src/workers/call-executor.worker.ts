@@ -77,7 +77,7 @@ export function createCallExecutorWorker(deps: CallExecutorDeps): Worker {
           lead_id: leadId,
           contact_id: contactId,
           company_id: companyId,
-          campaign_id: campaignId,
+          campaign_id: campaignId || null,
           persona: persona as PersonaName,
           from_number: config.fromNumber,
           to_number: phone,

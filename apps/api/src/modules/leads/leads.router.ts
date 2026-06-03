@@ -170,7 +170,7 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
         leadId: l['id'] as string,
         contactId: l['contact_id'] as string,
         companyId: l['company_id'] as string,
-        campaignId: (l['campaign_id'] as string | null) ?? '',
+        campaignId: (l['campaign_id'] as string | null) ?? null,
         phone,
         persona,
         attemptNumber,

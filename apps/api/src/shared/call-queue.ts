@@ -14,7 +14,7 @@ export interface CallExecutePayload {
   leadId: string;
   contactId: string;
   companyId: string;
-  campaignId: string;
+  campaignId: string | null;
   phone: string;
   persona: string;
   attemptNumber: number;
