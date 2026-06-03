@@ -1,4 +1,5 @@
 import { Redis } from 'ioredis';
+import { Queue } from 'bullmq';
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 import pino from 'pino';
@@ -9,6 +10,7 @@ import { createTranscriptWorker } from './workers/transcript.worker';
 import { createEmailSenderWorker } from './workers/email-sender.worker';
 import { createCrmSyncWorker } from './workers/crm-sync.worker';
 import { createLeadImportWorker } from './workers/lead-import.worker';
+import { createEmailSequenceWorker } from './workers/email-sequence.worker';
 import { ElevenLabsAgentClient, ClaudeReasoningService, GmailClient, ZoomInfoClient } from '@ai-sdr/integrations';
 import { DncChecker, TimezoneGuard, CallOutcomeScorer } from '@ai-sdr/core';
 
@@ -87,6 +89,20 @@ async function bootstrap(): Promise<void> {
       }));
       logger.info('Email sender worker started');
     }
+  }
+
+  if (workerTypes.includes('email-sequence')) {
+    // The email-sender worker consumes the literal `emailSender` queue (not
+    // QUEUE_NAMES.EMAIL_SEND), so we enqueue sends there.
+    const emailSenderQueue = new Queue('emailSender', { connection: redis });
+    workers.push(createEmailSequenceWorker({
+      supabase,
+      emailSenderQueue,
+      sequenceQueue: queues[QUEUE_NAMES.EMAIL_SEQUENCE],
+      connection: redis,
+      logger,
+    }));
+    logger.info('Email sequence worker started');
   }
 
   if (workerTypes.includes('crm-sync')) {

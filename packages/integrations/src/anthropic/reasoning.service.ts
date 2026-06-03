@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { Logger } from 'pino';
 import { buildQualificationAnalysisPrompt, QualificationAnalysisRequest } from './prompts/qualification.prompt';
 import { buildEmailWriterPrompt, EmailWriterContext } from './prompts/email-writer.prompt';
+export type { EmailSequenceType, EmailWriterContext } from './prompts/email-writer.prompt';
 import { buildHandoffSummaryPrompt } from './prompts/qualification.prompt';
 import { QualificationData, ClaudeAnalysis, MeetingDetails } from '@ai-sdr/database';
 

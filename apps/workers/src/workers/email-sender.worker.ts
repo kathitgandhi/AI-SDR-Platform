@@ -2,7 +2,7 @@ import { Worker, Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { Logger } from 'pino';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { GmailClient, ClaudeReasoningService } from '@ai-sdr/integrations';
+import { GmailClient, ClaudeReasoningService, EmailSequenceType } from '@ai-sdr/integrations';
 
 export interface EmailSendJobPayload {
   leadId: string;
@@ -12,6 +12,9 @@ export interface EmailSendJobPayload {
   subject?: string;
   body?: string;
   template?: string;
+  /** When enqueued by the email-sequence worker: drives Claude generation. */
+  sequenceType?: EmailSequenceType;
+  stepNumber?: number;
   cc?: string[];
   createdBy?: string;
 }
@@ -54,7 +57,7 @@ export function createEmailSenderWorker(deps: EmailSenderDeps): Worker {
   return new Worker<EmailSendJobPayload>(
     'emailSender', // queue name (matches what apps/api/.../emails.router.ts queues to)
     async (job: Job<EmailSendJobPayload>) => {
-      const { leadId, subject: providedSubject, body: providedBody, template, cc, createdBy } = job.data;
+      const { leadId, subject: providedSubject, body: providedBody, template, sequenceType: providedSequenceType, stepNumber: providedStepNumber, cc, createdBy } = job.data;
       const jobLogger = workerLogger.child({ jobId: job.id, leadId });
       jobLogger.info('Processing email send job');
 
@@ -79,10 +82,10 @@ export function createEmailSenderWorker(deps: EmailSenderDeps): Worker {
 
       if (!subject || !bodyText) {
         jobLogger.info('Generating email via Claude');
-        const sequenceType = (TEMPLATE_TO_SEQUENCE[template ?? 'follow_up'] ?? 'cold_followup') as any;
+        const sequenceType = (providedSequenceType ?? TEMPLATE_TO_SEQUENCE[template ?? 'follow_up'] ?? 'cold_followup') as EmailSequenceType;
         const generated = await claudeService.generateEmail({
           sequenceType,
-          stepNumber: 1,
+          stepNumber: providedStepNumber ?? 1,
           contactFirstName: contact.first_name ?? '',
           contactLastName: contact.last_name ?? '',
           contactTitle: contact.title ?? '',
