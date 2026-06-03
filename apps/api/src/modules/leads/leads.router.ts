@@ -4,6 +4,7 @@ import { Logger } from 'pino';
 import { NotFoundError, ValidationError } from '../../shared/errors';
 import { getUserId } from '../../shared/user-scope';
 import { enqueueCrmSync } from '../../shared/crm-sync-queue';
+import { enqueueCall } from '../../shared/call-queue';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -132,6 +133,56 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
       });
 
       res.json({ lead: data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/v1/leads/:id/call — manually enqueue an outbound call for this lead.
+  // The call-executor worker still enforces DNC + call-window checks before dialing.
+  router.post('/:id/call', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = getUserId(req);
+      let q = supabase
+        .from('leads')
+        .select('id, contact_id, company_id, campaign_id, assigned_persona, call_attempts, contacts(phone_direct, phone_hq)')
+        .eq('id', req.params.id);
+      if (userId) q = q.eq('created_by', userId);
+      const { data: lead, error } = await q.single();
+      if (error || !lead) throw new NotFoundError('Lead', req.params.id);
+
+      const l = lead as Record<string, unknown>;
+      const contact = Array.isArray(l['contacts'])
+        ? (l['contacts'] as Record<string, string | null>[])[0]
+        : (l['contacts'] as Record<string, string | null> | null);
+
+      // Allow an explicit override phone in the body; otherwise use the contact's
+      // direct/HQ number (mobiles are intentionally excluded — never call mobiles).
+      const phone = (req.body?.phone as string | undefined) ?? contact?.['phone_direct'] ?? contact?.['phone_hq'] ?? null;
+      if (!phone) throw new ValidationError('No callable phone number on this lead');
+
+      // Inbound-only 'receptionist' is never used for outbound; default to an SDR.
+      const rawPersona = (l['assigned_persona'] as string | null) ?? 'sarah';
+      const persona = rawPersona === 'receptionist' ? 'sarah' : rawPersona;
+      const attemptNumber = ((l['call_attempts'] as number | null) ?? 0) + 1;
+
+      const jobId = await enqueueCall({
+        leadId: l['id'] as string,
+        contactId: l['contact_id'] as string,
+        companyId: l['company_id'] as string,
+        campaignId: (l['campaign_id'] as string | null) ?? '',
+        phone,
+        persona,
+        attemptNumber,
+      });
+
+      await supabase
+        .from('leads')
+        .update({ stage: 'in_call_queue', updated_at: new Date().toISOString() })
+        .eq('id', l['id'] as string);
+
+      logger.info({ leadId: l['id'], jobId, persona, phone }, 'Manual outbound call enqueued');
+      res.json({ success: true, jobId, persona, phone, attemptNumber });
     } catch (err) {
       next(err);
     }

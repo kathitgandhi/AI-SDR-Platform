@@ -7,6 +7,7 @@ import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/Badge';
 import { UpdateLeadStageForm } from '@/components/leads/UpdateLeadStageForm';
 import { AddToDncForm } from '@/components/leads/AddToDncForm';
+import { CallNowButton } from '@/components/leads/CallNowButton';
 import { cn, formatDuration, formatRelativeTime, capitalize } from '@/lib/utils';
 import type { LeadStage } from '@ai-sdr/database';
 
@@ -71,6 +72,10 @@ export default async function LeadDetailPage({ params }: { params: { id: string 
 
           {/* Actions */}
           <div className="space-y-4">
+            <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+              <h3 className="text-sm font-semibold text-slate-900 mb-3">Outbound Call</h3>
+              <CallNowButton leadId={params.id} />
+            </div>
             <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
               <h3 className="text-sm font-semibold text-slate-900 mb-3">Update Stage</h3>
               <UpdateLeadStageForm leadId={params.id} currentStage={(lead as { stage: LeadStage }).stage} />
