@@ -101,7 +101,7 @@ export class ElevenLabsAgentClient {
       contact_first_name: params.contactFirstName,
       company_name: params.companyName,
       caller_name: params.callerName,
-      seller_company_name: params.sellerCompanyName,
+      seller_company: params.sellerCompanyName,
       contact_title: params.contactTitle,
       store_count: params.storeCount?.toString() ?? 'unknown',
       current_esl_vendor: params.currentEslVendor ?? 'unknown',
