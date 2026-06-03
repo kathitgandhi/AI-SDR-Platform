@@ -6,7 +6,7 @@ import rateLimit from 'express-rate-limit';
 import { env } from './config/env';
 import { logger } from './shared/logger';
 import { errorHandler, notFoundHandler } from './middleware/error-handler';
-import { createTelnyxWebhookRouter } from './webhooks/telnyx.webhook';
+import { createElevenLabsWebhookRouter } from './webhooks/elevenlabs.webhook';
 import { createDashboardRouter } from './modules/dashboard/dashboard.router';
 import { createCampaignsRouter } from './modules/campaigns/campaigns.router';
 import { createLeadsRouter } from './modules/leads/leads.router';
@@ -45,7 +45,8 @@ export function createApp(): Application {
   // --- Logging ---
   app.use(pinoHttp({ logger }));
 
-  // --- Raw body for webhook signature validation ---
+  // --- Webhook body parsing + raw body for signature validation ---
+  // JSON webhooks (ElevenLabs) keep their raw body for HMAC signature checks.
   app.use('/webhooks', express.raw({ type: 'application/json' }), (req, _, next) => {
     if (Buffer.isBuffer(req.body)) {
       (req as express.Request & { rawBody: Buffer }).rawBody = req.body;
@@ -53,6 +54,9 @@ export function createApp(): Application {
     }
     next();
   });
+  // Twilio posts application/x-www-form-urlencoded; signature is validated over
+  // the parsed params (not the raw body), so a plain urlencoded parser is fine.
+  app.use('/webhooks', express.urlencoded({ extended: false, type: 'application/x-www-form-urlencoded' }));
 
   // --- JSON body parsing (after webhook routes) ---
   app.use(express.json({ limit: '1mb' }));
@@ -78,10 +82,12 @@ export function createApp(): Application {
   });
 
   // --- Webhook routes ---
-  app.use('/webhooks', createTelnyxWebhookRouter({
+  // Inbound calls are answered by ElevenLabs (Twilio number imported there);
+  // the conversation-init webhook identifies the caller + records the call row.
+  app.use('/webhooks', createElevenLabsWebhookRouter({
     supabase,
     logger,
-    webhookSecret: env.TELNYX_WEBHOOK_SECRET,
+    webhookSecret: env.ELEVENLABS_WEBHOOK_SECRET,
   }));
   app.use('/webhooks', createSmsWebhookRouter({ supabase, logger }));
 

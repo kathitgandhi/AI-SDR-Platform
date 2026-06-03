@@ -7,13 +7,15 @@ const workerEnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   REDIS_URL: z.string().min(1),
 
-  TELNYX_API_KEY: z.string().min(1),
-  TELNYX_BASE_URL: z.string().url().default('https://api.telnyx.com/v2'),
-  TELNYX_CONNECTION_ID: z.string().min(1),
-  TELNYX_FROM_NUMBER: z.string().min(10),
+  // Twilio (voice number is imported into ElevenLabs; SMS/lookup via Twilio APIs).
+  TWILIO_ACCOUNT_SID: z.string().min(1),
+  TWILIO_AUTH_TOKEN: z.string().min(1),
+  TWILIO_FROM_NUMBER: z.string().min(10),
 
   ELEVENLABS_API_KEY: z.string().min(1),
   ELEVENLABS_BASE_URL: z.string().url().default('https://api.elevenlabs.io/v1'),
+  // ElevenLabs phone number id (phnum_...) backing outbound origination.
+  ELEVENLABS_PHONE_NUMBER_ID: z.string().min(1),
   ELEVENLABS_AGENT_MIKE: z.string().min(1),
   ELEVENLABS_AGENT_SARAH: z.string().min(1),
   ELEVENLABS_AGENT_DAVID: z.string().min(1),

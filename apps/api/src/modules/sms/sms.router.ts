@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
-import { TelnyxSmsClient, validateTelnyxWebhookSignature } from '@ai-sdr/integrations';
+import { TwilioSmsClient, validateTwilioWebhookSignature, TwilioInboundSmsPayload } from '@ai-sdr/integrations';
 import { env } from '../../config/env';
 import { NotFoundError, ValidationError } from '../../shared/errors';
 import { getUserId } from '../../shared/user-scope';
@@ -13,7 +13,7 @@ interface RouterContext {
 
 export function createSmsRouter({ supabase, logger }: RouterContext): Router {
   const router = Router();
-  const smsClient = new TelnyxSmsClient(env.TELNYX_API_KEY, env.TELNYX_BASE_URL, logger);
+  const smsClient = new TwilioSmsClient(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN, logger);
 
   // GET /api/v1/sms?contact_id=&direction=
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
@@ -75,15 +75,21 @@ export function createSmsRouter({ supabase, logger }: RouterContext): Router {
       const { to, body, contact_id, lead_id, from } = req.body;
       if (!to || !body) throw new ValidationError('to and body are required');
 
-      const fromNumber = from ?? env.TELNYX_FROM_NUMBER;
+      const fromNumber = from ?? env.TWILIO_FROM_NUMBER;
 
-      // Send via Telnyx
-      let telnyxId: string | undefined;
+      // Send via Twilio. The `telnyx_message_id` column is reused to store the
+      // Twilio Message SID (no DB migration — see migration 006).
+      let providerMessageId: string | undefined;
       let status = 'failed';
       let errorCode: string | undefined;
       try {
-        const result = await smsClient.send({ from: fromNumber, to, text: body });
-        telnyxId = result.data.id;
+        const result = await smsClient.send({
+          from: fromNumber,
+          to,
+          text: body,
+          messagingServiceSid: env.TWILIO_MESSAGING_SERVICE_SID || undefined,
+        });
+        providerMessageId = result.sid;
         status = 'sent';
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'unknown';
@@ -100,7 +106,7 @@ export function createSmsRouter({ supabase, logger }: RouterContext): Router {
         direction: 'outbound',
         body,
         status,
-        telnyx_message_id: telnyxId,
+        telnyx_message_id: providerMessageId,
         error_code: errorCode,
         sent_at: status === 'sent' ? new Date().toISOString() : null,
       };
@@ -142,39 +148,52 @@ export function createSmsRouter({ supabase, logger }: RouterContext): Router {
 }
 
 /**
- * Webhook handler for Telnyx SMS events.
- * Mount under /webhooks/telnyx-sms — no auth required (validated by signature).
+ * Webhook handler for Twilio SMS events.
+ * Mount under /webhooks/twilio-sms — no auth required (validated by signature).
+ *
+ * Twilio sends a single endpoint two kinds of POSTs (application/x-www-form-urlencoded):
+ *   - Inbound message    → SmsStatus/MessageStatus = 'received', includes Body
+ *   - Status callback     → MessageStatus in {queued,sending,sent,delivered,undelivered,failed}
  */
 export function createSmsWebhookRouter(deps: { supabase: SupabaseClient; logger: Logger }): Router {
   const router = Router();
   const { supabase, logger } = deps;
 
-  router.post('/telnyx-sms', async (req: Request, res: Response) => {
-    // Validate Telnyx signature (defence in depth; webhook URL is public)
-    const signature = req.headers['telnyx-signature-ed25519'] as string | undefined;
-    const timestamp = req.headers['telnyx-timestamp'] as string | undefined;
-    if (signature && timestamp && env.TELNYX_WEBHOOK_SECRET) {
-      const raw = (req as any).rawBody ? (req as any).rawBody.toString() : JSON.stringify(req.body);
-      const valid = validateTelnyxWebhookSignature(raw, signature, env.TELNYX_WEBHOOK_SECRET);
+  router.post('/twilio-sms', async (req: Request, res: Response) => {
+    const payload = (req.body ?? {}) as TwilioInboundSmsPayload;
+
+    // Validate Twilio signature (defence in depth; webhook URL is public).
+    const signature = req.headers['x-twilio-signature'] as string | undefined;
+    if (env.TWILIO_AUTH_TOKEN) {
+      const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? req.protocol;
+      const url = `${proto}://${req.get('host')}${req.originalUrl}`;
+      const valid = validateTwilioWebhookSignature(
+        env.TWILIO_AUTH_TOKEN,
+        signature,
+        url,
+        payload as Record<string, string | undefined>
+      );
       if (!valid) {
-        logger.warn('Rejected SMS webhook with invalid signature');
+        logger.warn('Rejected SMS webhook with invalid Twilio signature');
         res.status(401).json({ error: 'Invalid signature' });
         return;
       }
     } else {
-      logger.warn('SMS webhook received without Telnyx signature headers — accepting in dev mode');
+      logger.warn('SMS webhook received but TWILIO_AUTH_TOKEN unset — accepting in dev mode');
     }
 
-    res.status(200).json({ received: true });
+    // Twilio expects a 2xx; empty TwiML is fine (no auto-reply).
+    res.status(200).type('text/xml').send('<Response></Response>');
 
-    const payload = (req.body?.data?.payload ?? {}) as Record<string, any>;
-    const eventType = req.body?.data?.event_type as string;
+    const status = (payload.MessageStatus ?? payload.SmsStatus ?? '').toLowerCase();
+    const messageSid = payload.MessageSid ?? payload.SmsSid;
 
     try {
-      if (eventType === 'message.received') {
-        const fromNumber = payload.from?.phone_number ?? payload.from;
-        const toNumber = payload.to?.[0]?.phone_number ?? payload.to;
-        const body = payload.text ?? '';
+      if (status === 'received') {
+        // Inbound message
+        const fromNumber = payload.From;
+        const toNumber = payload.To;
+        const body = payload.Body ?? '';
 
         // Look up contact by phone
         const { data: matchedContact } = await supabase
@@ -189,8 +208,8 @@ export function createSmsWebhookRouter(deps: { supabase: SupabaseClient; logger:
           direction: 'inbound',
           body,
           status: 'received',
-          telnyx_message_id: payload.id,
-          sent_at: payload.received_at ?? new Date().toISOString(),
+          telnyx_message_id: messageSid,
+          sent_at: new Date().toISOString(),
         };
         if (matchedContact) {
           insert.contact_id = matchedContact.id;
@@ -198,17 +217,16 @@ export function createSmsWebhookRouter(deps: { supabase: SupabaseClient; logger:
         }
         await supabase.from('sms_messages').insert(insert);
         logger.info({ from: fromNumber }, 'Inbound SMS recorded');
-      } else if (eventType === 'message.sent' || eventType === 'message.finalized') {
-        // Mark delivered
-        const id = payload.id;
-        const finalStatus = payload.to?.[0]?.status ?? 'delivered';
-        await supabase
-          .from('sms_messages')
-          .update({
-            status: finalStatus,
-            delivered_at: new Date().toISOString(),
-          })
-          .eq('telnyx_message_id', id);
+      } else if (messageSid && status) {
+        // Outbound status callback — update existing row by Message SID.
+        const update: Record<string, unknown> = { status };
+        if (status === 'delivered' || status === 'sent') {
+          update.delivered_at = new Date().toISOString();
+        }
+        if ((status === 'failed' || status === 'undelivered') && payload.ErrorCode) {
+          update.error_code = payload.ErrorCode;
+        }
+        await supabase.from('sms_messages').update(update).eq('telnyx_message_id', messageSid);
       }
     } catch (err) {
       logger.error({ err }, 'SMS webhook error');

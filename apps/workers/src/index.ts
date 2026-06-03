@@ -9,7 +9,7 @@ import { createTranscriptWorker } from './workers/transcript.worker';
 import { createEmailSenderWorker } from './workers/email-sender.worker';
 import { createCrmSyncWorker } from './workers/crm-sync.worker';
 import { createLeadImportWorker } from './workers/lead-import.worker';
-import { TelnyxCallClient, ElevenLabsAgentClient, ClaudeReasoningService, GmailClient, ZoomInfoClient } from '@ai-sdr/integrations';
+import { ElevenLabsAgentClient, ClaudeReasoningService, GmailClient, ZoomInfoClient } from '@ai-sdr/integrations';
 import { DncChecker, TimezoneGuard, CallOutcomeScorer } from '@ai-sdr/core';
 
 const logger = pino({ level: workerEnv.LOG_LEVEL });
@@ -29,19 +29,18 @@ async function bootstrap(): Promise<void> {
   const timezoneGuard = new TimezoneGuard(workerEnv.CALL_WINDOW_START_HOUR, workerEnv.CALL_WINDOW_END_HOUR);
 
   if (workerTypes.includes('call-executor')) {
-    const telnyxCallClient = new TelnyxCallClient(workerEnv.TELNYX_API_KEY, workerEnv.TELNYX_BASE_URL, logger);
     const elevenLabsClient = new ElevenLabsAgentClient(workerEnv.ELEVENLABS_API_KEY, workerEnv.ELEVENLABS_BASE_URL, logger);
 
     workers.push(createCallExecutorWorker({
-      supabase, telnyxCallClient, elevenLabsClient, dncChecker, timezoneGuard,
+      supabase, elevenLabsClient, dncChecker, timezoneGuard,
       transcriptQueue: queues[QUEUE_NAMES.TRANSCRIPT_PROCESS],
       connection: redis, logger,
       config: {
-        fromNumber: workerEnv.TELNYX_FROM_NUMBER,
+        fromNumber: workerEnv.TWILIO_FROM_NUMBER,
         companyName: workerEnv.COMPANY_NAME,
         maxDurationSeconds: workerEnv.CALL_MAX_DURATION_SECONDS,
         ringTimeoutSeconds: workerEnv.CALL_RING_TIMEOUT_SECONDS,
-        telnyxConnectionId: workerEnv.TELNYX_CONNECTION_ID,
+        elevenLabsPhoneNumberId: workerEnv.ELEVENLABS_PHONE_NUMBER_ID,
       },
     }));
     logger.info('Call executor worker started');

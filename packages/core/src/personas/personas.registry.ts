@@ -1,7 +1,7 @@
-import { PersonaName } from '@ai-sdr/database';
+import { PersonaName, SdrPersonaName } from '@ai-sdr/database';
 
 export interface PersonaDefinition {
-  name: PersonaName;
+  name: SdrPersonaName;
   displayName: string;
   tone: string;
   style: string;
@@ -15,7 +15,7 @@ export interface PersonaDefinition {
   sampleTransition: string;
 }
 
-export const PERSONAS: Record<PersonaName, PersonaDefinition> = {
+export const PERSONAS: Record<SdrPersonaName, PersonaDefinition> = {
   mike: {
     name: 'mike',
     displayName: 'Mike',
@@ -172,7 +172,8 @@ export const PERSONAS: Record<PersonaName, PersonaDefinition> = {
 };
 
 export function getPersona(name: PersonaName): PersonaDefinition {
-  const persona = PERSONAS[name];
+  // 'receptionist' has no SDR definition; the guard below throws for it.
+  const persona = PERSONAS[name as SdrPersonaName];
   if (!persona) throw new Error(`Unknown persona: ${name}`);
   return persona;
 }

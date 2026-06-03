@@ -17,7 +17,10 @@ export type CallOutcome = 'meeting_booked' | 'callback_requested' | 'not_interes
 export type EmailStatus = 'pending' | 'sent' | 'delivered' | 'opened' | 'clicked' | 'replied' | 'bounced' | 'spam' | 'unsubscribed' | 'failed';
 export type CampaignStatus = 'draft' | 'active' | 'paused' | 'completed' | 'archived';
 export type RetailVertical = 'grocery' | 'general_retail' | 'wholesale_distribution' | 'automotive_retail' | 'electronics' | 'specialty' | 'cpg_operator' | 'pharmacy' | 'convenience' | 'home_improvement' | 'fashion_apparel' | 'furniture' | 'unknown';
-export type PersonaName = 'mike' | 'sarah' | 'david' | 'rachel' | 'chris' | 'emma' | 'daniel';
+/** The 7 outbound SDR personas. */
+export type SdrPersonaName = 'mike' | 'sarah' | 'david' | 'rachel' | 'chris' | 'emma' | 'daniel';
+/** All values of the persona_name enum — SDRs plus the inbound receptionist. */
+export type PersonaName = SdrPersonaName | 'receptionist';
 export type CrmProvider = 'hubspot' | 'salesforce' | 'pipedrive' | 'zoho' | 'none';
 
 export interface Company {
