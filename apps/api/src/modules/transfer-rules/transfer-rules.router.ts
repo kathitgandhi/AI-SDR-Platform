@@ -119,49 +119,36 @@ export function createTransferRulesRouter({ supabase, logger }: RouterContext): 
     }
   });
 
-  // POST /api/v1/transfer-rules/:id/transfer-now
-  // Manually trigger a transfer on an in-progress call (button in UI for live override)
+  // POST /api/v1/transfer-rules/transfer-now
+  // Manually trigger a transfer on an in-progress call (button in UI for live override).
+  //
+  // ⚠️ NOT SUPPORTED with the ElevenLabs/Twilio stack. ElevenLabs owns the live
+  // call leg, and there is no backend REST endpoint to force-transfer an active
+  // conversation to a PSTN number. Live transfer must instead be configured as an
+  // agent-side "Transfer to number" tool in the ElevenLabs dashboard (the agent
+  // invokes it when the `explicit_request`/keyword conditions are met). This route
+  // is retained so the UI gets a clear, actionable error rather than a 404.
   router.post('/transfer-now', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { call_id, transfer_to_number, transfer_to_name } = req.body;
+      const { call_id, transfer_to_number } = req.body;
       if (!call_id || !transfer_to_number) {
         throw new ValidationError('call_id and transfer_to_number required');
       }
 
-      // Look up call to get call_control_id
-      const { data: call } = await supabase
-        .from('calls')
-        .select('id, call_control_id, status')
-        .eq('id', call_id)
-        .single();
+      logger.warn(
+        { callId: call_id, to: transfer_to_number },
+        'transfer-now invoked but manual live transfer is not supported on ElevenLabs/Twilio',
+      );
 
-      if (!call?.call_control_id) {
-        res.status(409).json({ error: 'Call has no active control ID — cannot transfer' });
-        return;
-      }
-      if (!['ringing', 'answered'].includes(call.status)) {
-        res.status(409).json({ error: `Call status is "${call.status}" — only active calls can be transferred` });
-        return;
-      }
-
-      // Use TelnyxCallClient via dynamic import to avoid pulling it everywhere
-      const { TelnyxCallClient } = await import('@ai-sdr/integrations');
-      const { env } = await import('../../config/env');
-      const telnyxClient = new TelnyxCallClient(env.TELNYX_API_KEY, env.TELNYX_BASE_URL, logger);
-
-      await telnyxClient.transfer({
-        call_control_id: call.call_control_id,
-        to: transfer_to_number,
+      res.status(501).json({
+        error: {
+          code: 'LIVE_TRANSFER_UNSUPPORTED',
+          message:
+            'Manual live transfer is not available with the ElevenLabs/Twilio stack. ' +
+            'Configure a "Transfer to number" tool on the ElevenLabs agent so it can transfer ' +
+            'when a transfer rule (explicit_request / keyword) is triggered.',
+        },
       });
-
-      await supabase.from('calls').update({
-        outcome: 'transferred',
-        internal_notes: `Transferred to ${transfer_to_name ?? transfer_to_number}`,
-        updated_at: new Date().toISOString(),
-      }).eq('id', call_id);
-
-      logger.info({ callId: call_id, to: transfer_to_number }, 'Call manually transferred');
-      res.json({ success: true, transferred_to: transfer_to_number });
     } catch (err) {
       next(err);
     }

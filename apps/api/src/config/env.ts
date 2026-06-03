@@ -24,16 +24,19 @@ const envSchema = z.object({
   ZOOMINFO_BASE_URL: z.string().url().default('https://api.zoominfo.com/lookup'),
   ZOOMINFO_RATE_LIMIT_RPM: z.coerce.number().default(100),
 
-  // Telnyx
-  TELNYX_API_KEY: z.string().min(1),
-  TELNYX_CONNECTION_ID: z.string().min(1),
-  TELNYX_FROM_NUMBER: z.string().min(10),
-  TELNYX_WEBHOOK_SECRET: z.string().min(1),
-  TELNYX_BASE_URL: z.string().url().default('https://api.telnyx.com/v2'),
+  // Twilio (voice number imported into ElevenLabs; SMS + phone lookup via Twilio APIs)
+  TWILIO_ACCOUNT_SID: z.string().min(1),
+  TWILIO_AUTH_TOKEN: z.string().min(1),
+  TWILIO_FROM_NUMBER: z.string().min(10),
+  TWILIO_MESSAGING_SERVICE_SID: z.string().optional(),
 
   // ElevenLabs
   ELEVENLABS_API_KEY: z.string().min(1),
   ELEVENLABS_BASE_URL: z.string().url().default('https://api.elevenlabs.io/v1'),
+  // ElevenLabs phone number id (phnum_...) backing call origination.
+  ELEVENLABS_PHONE_NUMBER_ID: z.string().min(1),
+  // HMAC secret for ElevenLabs inbound/conversation webhooks (set in ElevenLabs portal).
+  ELEVENLABS_WEBHOOK_SECRET: z.string().optional(),
   ELEVENLABS_AGENT_MIKE: z.string().min(1),
   ELEVENLABS_AGENT_SARAH: z.string().min(1),
   ELEVENLABS_AGENT_DAVID: z.string().min(1),

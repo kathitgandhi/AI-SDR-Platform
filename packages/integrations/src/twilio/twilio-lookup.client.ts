@@ -1,10 +1,17 @@
 import axios, { AxiosInstance } from 'axios';
 import { Logger } from 'pino';
-import { TelnyxPhoneLookupResponse, TelnyxLineType } from './telnyx.types';
+import { TwilioLookupResponse, TwilioLineType } from './twilio.types';
 import { LineType } from '@ai-sdr/database';
 
-const CALLABLE_LINE_TYPES: TelnyxLineType[] = ['landline'];
-const EMAIL_ONLY_LINE_TYPES: TelnyxLineType[] = ['mobile', 'voip'];
+/**
+ * Drop-in replacement for TelnyxLookupClient. Returns the IDENTICAL
+ * PhoneLookupResult shape so the phone_lookup worker stays unchanged.
+ *
+ * Backed by Twilio Lookup v2 line_type_intelligence.
+ */
+
+const CALLABLE_LINE_TYPES: TwilioLineType[] = ['landline'];
+const EMAIL_ONLY_LINE_TYPES: TwilioLineType[] = ['mobile', 'voip', 'fixedVoip', 'nonFixedVoip'];
 
 export interface PhoneLookupResult {
   phoneNumber: string;
@@ -14,23 +21,30 @@ export interface PhoneLookupResult {
   isDead: boolean;
   carrierName: string | null;
   isValid: boolean;
+  /** Twilio Lookup v2 does not return a fraud score; always null. */
   fraudRiskScore: number | null;
-  rawLineType: TelnyxLineType;
+  rawLineType: TwilioLineType;
 }
 
-export class TelnyxLookupClient {
+const TWILIO_LOOKUP_BASE_URL = 'https://lookups.twilio.com';
+
+export class TwilioLookupClient {
   private readonly http: AxiosInstance;
   private readonly logger: Logger;
 
-  constructor(apiKey: string, baseUrl: string, logger: Logger) {
-    this.logger = logger.child({ module: 'TelnyxLookupClient' });
+  /**
+   * @param accountSid Twilio Account SID (basic-auth username)
+   * @param authToken  Twilio Auth Token (basic-auth password)
+   * @param logger     pino logger
+   * @param baseUrl    override (defaults to https://lookups.twilio.com)
+   */
+  constructor(accountSid: string, authToken: string, logger: Logger, baseUrl: string = TWILIO_LOOKUP_BASE_URL) {
+    this.logger = logger.child({ module: 'TwilioLookupClient' });
     this.http = axios.create({
       baseURL: baseUrl,
       timeout: 15000,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
+      auth: { username: accountSid, password: authToken },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
   }
 
@@ -38,28 +52,17 @@ export class TelnyxLookupClient {
     const normalized = this.normalizePhone(phoneNumber);
 
     try {
-      const response = await this.http.get<TelnyxPhoneLookupResponse>(
-        `/phone_numbers/${encodeURIComponent(normalized)}`,
-        {
-          params: {
-            type: 'carrier,caller-name,fraud',
-          },
-        }
+      const response = await this.http.get<TwilioLookupResponse>(
+        `/v2/PhoneNumbers/${encodeURIComponent(normalized)}`,
+        { params: { Fields: 'line_type_intelligence' } }
       );
 
-      const data = response.data.data;
-      const rawLineType = data.line_type;
+      const data = response.data;
+      const rawLineType: TwilioLineType = data.line_type_intelligence?.type ?? 'unknown';
       const lineType = this.mapLineType(rawLineType);
-      const fraudScore = data.fraud?.risk_score ?? null;
 
-      const isCallable =
-        data.valid &&
-        CALLABLE_LINE_TYPES.includes(rawLineType) &&
-        (fraudScore === null || fraudScore < 70);
-
-      const isEmailOnly =
-        data.valid && EMAIL_ONLY_LINE_TYPES.includes(rawLineType);
-
+      const isCallable = data.valid && CALLABLE_LINE_TYPES.includes(rawLineType);
+      const isEmailOnly = data.valid && EMAIL_ONLY_LINE_TYPES.includes(rawLineType);
       const isDead = !data.valid;
 
       this.logger.debug({ phoneNumber: normalized, rawLineType, isCallable }, 'Phone lookup complete');
@@ -70,9 +73,9 @@ export class TelnyxLookupClient {
         isCallable,
         isEmailOnly,
         isDead,
-        carrierName: data.carrier?.name ?? null,
+        carrierName: data.line_type_intelligence?.carrier_name ?? null,
         isValid: data.valid,
-        fraudRiskScore: fraudScore,
+        fraudRiskScore: null,
         rawLineType,
       };
     } catch (error) {
@@ -118,21 +121,23 @@ export class TelnyxLookupClient {
     return `+${digits}`;
   }
 
-  private mapLineType(telnyxType: TelnyxLineType): LineType {
-    const map: Record<TelnyxLineType, LineType> = {
+  private mapLineType(twilioType: TwilioLineType): LineType {
+    const map: Record<TwilioLineType, LineType> = {
       landline: 'landline',
       mobile: 'mobile',
       voip: 'voip',
-      toll_free: 'toll_free',
-      premium_rate: 'premium',
-      shared_cost: 'unknown',
-      personal_number: 'mobile',
+      fixedVoip: 'voip',
+      nonFixedVoip: 'voip',
+      tollFree: 'toll_free',
+      premium: 'premium',
+      sharedCost: 'unknown',
+      personal: 'mobile',
       pager: 'unknown',
       uan: 'unknown',
       voicemail: 'unknown',
       unknown: 'unknown',
     };
-    return map[telnyxType] ?? 'unknown';
+    return map[twilioType] ?? 'unknown';
   }
 
   private chunkArray<T>(arr: T[], size: number): T[][] {

@@ -2,7 +2,6 @@ import { Worker, Job, Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import { Logger } from 'pino';
 import { CallExecuteJobPayload, QUEUE_NAMES, TranscriptProcessJobPayload } from '../queues/queue.registry';
-import { TelnyxCallClient } from '@ai-sdr/integrations';
 import { ElevenLabsAgentClient } from '@ai-sdr/integrations';
 import { DncChecker, TimezoneGuard } from '@ai-sdr/core';
 import { SupabaseClient } from '@supabase/supabase-js';
@@ -14,12 +13,12 @@ interface CallExecutorConfig {
   companyName: string;
   maxDurationSeconds: number;
   ringTimeoutSeconds: number;
-  telnyxConnectionId: string;
+  /** ElevenLabs phone number id (phnum_...) backing outbound origination, now Twilio-backed. */
+  elevenLabsPhoneNumberId: string;
 }
 
 interface CallExecutorDeps {
   supabase: SupabaseClient;
-  telnyxCallClient: TelnyxCallClient;
   elevenLabsClient: ElevenLabsAgentClient;
   dncChecker: DncChecker;
   timezoneGuard: TimezoneGuard;
@@ -112,7 +111,7 @@ export function createCallExecutorWorker(deps: CallExecutorDeps): Worker {
       try {
         const elCall = await elevenLabsClient.initiateOutboundCall({
           agent_id: agentId,
-          agent_phone_number_id: config.telnyxConnectionId,
+          agent_phone_number_id: config.elevenLabsPhoneNumberId,
           to_number: phone,
           conversation_initiation_client_data: { dynamic_variables: dynamicVars },
         });

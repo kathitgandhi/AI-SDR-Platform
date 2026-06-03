@@ -29,8 +29,8 @@
 ### Webhook Validation
 ```
 // All webhooks validated before processing:
-Telnyx:    HMAC-SHA256 of payload + timestamp using TELNYX_WEBHOOK_SECRET
-ElevenLabs: Token-based validation in header
+Twilio:    HMAC-SHA1 of URL + sorted POST params using TWILIO_AUTH_TOKEN (X-Twilio-Signature)
+ElevenLabs: HMAC-SHA256 of `t.body` using ELEVENLABS_WEBHOOK_SECRET (ElevenLabs-Signature: t=,v0=)
 Gmail:     Google OAuth2 push notification validation
 ```
 
@@ -139,9 +139,10 @@ Attempt 5: 625 seconds (CRM sync only)
 
 ### Inbound Webhooks
 ```
-POST /webhooks/telnyx     → Call state events (answered, hangup, voicemail detect)
-POST /webhooks/elevenlabs → Conversation events (if ElevenLabs sends direct webhooks)
-POST /webhooks/gmail      → Email open/click/reply/bounce events
+POST /webhooks/elevenlabs/conversation-init → Inbound caller ID + dynamic vars at call start
+POST /webhooks/elevenlabs/post-call         → Post-call finalization hook
+POST /webhooks/twilio-sms                   → Inbound SMS + delivery status callbacks
+POST /webhooks/gmail                        → Email open/click/reply/bounce events
 ```
 
 ### Webhook Processing Pattern

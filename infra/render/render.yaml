@@ -34,13 +34,17 @@ services:
           type: redis
           name: ai-sdr-redis
           property: connectionString
-      - key: TELNYX_API_KEY
+      - key: TWILIO_ACCOUNT_SID
         sync: false
-      - key: TELNYX_CONNECTION_ID
+      - key: TWILIO_AUTH_TOKEN
         sync: false
-      - key: TELNYX_WEBHOOK_SECRET
+      - key: TWILIO_FROM_NUMBER
         sync: false
       - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_PHONE_NUMBER_ID
+        sync: false
+      - key: ELEVENLABS_WEBHOOK_SECRET
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
@@ -97,13 +101,15 @@ services:
           type: redis
           name: ai-sdr-redis
           property: connectionString
-      - key: TELNYX_API_KEY
+      - key: TWILIO_ACCOUNT_SID
         sync: false
-      - key: TELNYX_CONNECTION_ID
+      - key: TWILIO_AUTH_TOKEN
         sync: false
-      - key: TELNYX_FROM_NUMBER
+      - key: TWILIO_FROM_NUMBER
         sync: false
       - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_PHONE_NUMBER_ID
         sync: false
       - key: ELEVENLABS_AGENT_MIKE
         sync: false
@@ -160,8 +166,6 @@ services:
       - key: ZOOMINFO_CLIENT_ID
         sync: false
       - key: ZOOMINFO_CLIENT_SECRET
-        sync: false
-      - key: TELNYX_API_KEY
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false

@@ -112,7 +112,7 @@ function buildOpenApiSpec() {
 
       '/api/v1/sms': { get: { summary: 'List SMS messages — filters: contact_id, lead_id, direction' } },
       '/api/v1/sms/threads': { get: { summary: 'One row per contact, latest message first' } },
-      '/api/v1/sms/send': { post: { summary: 'Send SMS via Telnyx' } },
+      '/api/v1/sms/send': { post: { summary: 'Send SMS via Twilio' } },
 
       '/api/v1/transfer-rules': {
         get: { summary: 'List transfer rules' },
@@ -148,8 +148,9 @@ function buildOpenApiSpec() {
 
       '/api/v1/queues/': { get: { summary: 'All queue stats' } },
 
-      '/webhooks/telnyx': { post: { summary: 'Telnyx Call Control webhook', security: [] } },
-      '/webhooks/telnyx-sms': { post: { summary: 'Telnyx Messaging webhook', security: [] } },
+      '/webhooks/elevenlabs/conversation-init': { post: { summary: 'ElevenLabs conversation-init webhook (inbound caller ID)', security: [] } },
+      '/webhooks/elevenlabs/post-call': { post: { summary: 'ElevenLabs post-call webhook', security: [] } },
+      '/webhooks/twilio-sms': { post: { summary: 'Twilio Messaging webhook (inbound + status)', security: [] } },
     },
   };
 }
