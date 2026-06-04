@@ -248,8 +248,6 @@ async function enrollInEmailSequence(
 ): Promise<void> {
   const { data: sequence } = await supabase.from('email_sequences').select('id').eq('name', sequenceName).eq('is_active', true).maybeSingle();
   if (!sequence) return;
-  const { data: existing } = await supabase.from('contact_sequences').select('id').eq('contact_id', contactId).eq('sequence_id', sequence.id).maybeSingle();
-  if (existing) return;
 
   // Send the FIRST email immediately (no delay). The email-sequence worker
   // schedules subsequent steps from their own delay_days/delay_hours config, so
@@ -266,12 +264,40 @@ async function enrollInEmailSequence(
   const startStep = firstStep?.step_number ?? 1;
   const nextSendAt = new Date();
 
-  const { data: enrollment } = await supabase.from('contact_sequences').insert({
-    contact_id: contactId, lead_id: leadId, sequence_id: sequence.id, campaign_id: campaignId,
-    trigger_event: sequenceName, trigger_call_id: triggerCallId, next_send_at: nextSendAt.toISOString(),
-    current_step: startStep, status: 'active',
-  }).select().single();
-  if (enrollment) {
-    await emailSequenceQueue.add('process-sequence', { contactSequenceId: enrollment.id }, { delay: 0 });
+  // contact_sequences has UNIQUE(contact_id, sequence_id), so a contact can only
+  // hold one enrollment row per sequence. To re-engage on EVERY new call (policy
+  // B), if the contact is already enrolled we RESET that enrollment back to the
+  // first step and re-fire it, rather than skipping. Otherwise insert fresh.
+  const { data: existing } = await supabase
+    .from('contact_sequences')
+    .select('id')
+    .eq('contact_id', contactId)
+    .eq('sequence_id', sequence.id)
+    .maybeSingle();
+
+  let enrollmentId: string | null = null;
+  if (existing) {
+    const { data: reset } = await supabase
+      .from('contact_sequences')
+      .update({
+        lead_id: leadId, campaign_id: campaignId, trigger_event: sequenceName,
+        trigger_call_id: triggerCallId, next_send_at: nextSendAt.toISOString(),
+        current_step: startStep, status: 'active', completed_at: null,
+      })
+      .eq('id', existing.id)
+      .select('id')
+      .single();
+    enrollmentId = reset?.id ?? existing.id;
+  } else {
+    const { data: enrollment } = await supabase.from('contact_sequences').insert({
+      contact_id: contactId, lead_id: leadId, sequence_id: sequence.id, campaign_id: campaignId,
+      trigger_event: sequenceName, trigger_call_id: triggerCallId, next_send_at: nextSendAt.toISOString(),
+      current_step: startStep, status: 'active',
+    }).select('id').single();
+    enrollmentId = enrollment?.id ?? null;
+  }
+
+  if (enrollmentId) {
+    await emailSequenceQueue.add('process-sequence', { contactSequenceId: enrollmentId }, { delay: 0 });
   }
 }
