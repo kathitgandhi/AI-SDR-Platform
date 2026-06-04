@@ -37,7 +37,8 @@ function getQueue(): Queue {
  */
 export async function enqueueTranscript(payload: TranscriptProcessPayload): Promise<string> {
   const job = await getQueue().add('process-transcript', payload, {
-    jobId: `transcript:${payload.conversationId}`,
+    // BullMQ custom job IDs may NOT contain ':' (Redis key separator) — use '-'.
+    jobId: `transcript-${payload.conversationId}`,
     delay: 0,
     attempts: 3,
     backoff: { type: 'exponential', delay: 5000 },
