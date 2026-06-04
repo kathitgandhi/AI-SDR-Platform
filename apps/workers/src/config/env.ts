@@ -36,6 +36,18 @@ const workerEnvSchema = z.object({
   CALL_WINDOW_START_HOUR: z.coerce.number().default(8),
   CALL_WINDOW_END_HOUR: z.coerce.number().default(21),
 
+  // --- Pipeline scheduler (auto-dial + auto-import) ---
+  // How often the autonomous engine scans active campaigns to dial leads / top
+  // up the lead pool. Only used when WORKER_TYPES includes 'scheduler'.
+  PIPELINE_DIAL_INTERVAL_MS: z.coerce.number().default(60_000),
+  PIPELINE_IMPORT_INTERVAL_MS: z.coerce.number().default(1_800_000),
+  PIPELINE_MIN_LEAD_BUFFER: z.coerce.number().default(200),
+  PIPELINE_IMPORT_COOLDOWN_MS: z.coerce.number().default(21_600_000),
+  PIPELINE_DIAL_BATCH: z.coerce.number().default(10),
+  // When true, a phone we can't positively confirm as a landline drops the lead
+  // to email_only. Default false keeps the pipeline flowing if Lookup add-on off.
+  PHONE_LOOKUP_STRICT: z.enum(['true', 'false']).default('false'),
+
   GMAIL_CLIENT_ID: z.string().optional(),
   GMAIL_CLIENT_SECRET: z.string().default(''),
   GMAIL_REFRESH_TOKEN: z.string().optional(),
