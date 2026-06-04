@@ -134,7 +134,7 @@ export function createCallExecutorWorker(deps: CallExecutorDeps): Worker {
           // deterministic jobId with the webhook-enqueued job so the two collapse
           // into one while either is still queued (BullMQ ignores a duplicate id).
           {
-            jobId: `transcript:${elCall.conversation_id}`,
+            jobId: `transcript-${elCall.conversation_id}`,
             delay: config.maxDurationSeconds * 1000 + 30000,
           }
         );
