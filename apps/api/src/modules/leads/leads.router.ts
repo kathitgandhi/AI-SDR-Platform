@@ -5,6 +5,8 @@ import { NotFoundError, ValidationError } from '../../shared/errors';
 import { getUserId } from '../../shared/user-scope';
 import { enqueueCrmSync } from '../../shared/crm-sync-queue';
 import { enqueueCall } from '../../shared/call-queue';
+import { enqueuePhoneLookup } from '../../shared/phone-lookup-queue';
+import { audit } from '../../shared/audit';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -70,6 +72,147 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
       if (error) throw error;
 
       res.json({ leads: data ?? [], total: count ?? 0 });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/v1/leads — manually create a single lead (company + contact + lead).
+  // Mirrors the CSV-import / ZoomInfo mapping so a hand-added lead flows through
+  // the exact same pipeline. By default a lead with a phone is sent to
+  // phone-lookup (line-type validation + DNC), which routes it to callable /
+  // email_only; pass run_phone_lookup:false to trust the number and mark it
+  // callable immediately. A lead with only an email lands in email_only.
+  router.post('/', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = getUserId(req);
+      const b = req.body as Record<string, unknown>;
+
+      const firstName = String(b['first_name'] ?? '').trim();
+      if (!firstName) throw new ValidationError('first_name is required');
+
+      const email = b['email'] ? String(b['email']).trim().toLowerCase() : null;
+      const phone = b['phone'] ? String(b['phone']).trim() : null;
+      if (!email && !phone) throw new ValidationError('email or phone is required');
+
+      const companyName = String(b['company_name'] ?? '').trim();
+      if (!companyName) throw new ValidationError('company_name is required');
+
+      const campaignId = b['campaign_id'] ? String(b['campaign_id']) : null;
+      const runPhoneLookup = b['run_phone_lookup'] !== false; // default true
+      const source = b['source'] ? String(b['source']) : 'manual';
+
+      // 1. Company — dedupe by name within the caller's scope (mirrors imports).
+      let companyId: string;
+      const { data: existingCo } = await supabase
+        .from('companies')
+        .select('id')
+        .eq('name', companyName)
+        .eq(userId ? 'created_by' : 'id', userId ?? '00000000-0000-0000-0000-000000000000')
+        .maybeSingle();
+
+      if (existingCo) {
+        companyId = existingCo.id;
+        // Backfill calling-window state if newly provided.
+        if (b['headquarters_state']) {
+          await supabase.from('companies')
+            .update({ headquarters_state: String(b['headquarters_state']), updated_at: new Date().toISOString() })
+            .eq('id', companyId);
+        }
+      } else {
+        const { data: newCo, error: coErr } = await supabase
+          .from('companies')
+          .insert({
+            name: companyName,
+            website: b['company_website'] ? String(b['company_website']) : null,
+            retail_vertical: (b['retail_vertical'] ?? 'unknown') as any,
+            store_count: b['store_count'] != null ? Number(b['store_count']) : null,
+            headquarters_state: b['headquarters_state'] ? String(b['headquarters_state']) : null,
+            created_by: userId ?? null,
+          })
+          .select('id')
+          .single();
+        if (coErr || !newCo) throw new ValidationError(`Company insert failed: ${coErr?.message ?? 'unknown'}`);
+        companyId = newCo.id;
+      }
+
+      // 2. Contact — dedupe by email when present, else insert.
+      let contactId: string;
+      const existingCt = email
+        ? (await supabase.from('contacts').select('id').eq('email', email).maybeSingle()).data
+        : null;
+      if (existingCt) {
+        contactId = existingCt.id;
+      } else {
+        const { data: newCt, error: ctErr } = await supabase
+          .from('contacts')
+          .insert({
+            company_id: companyId,
+            first_name: firstName,
+            last_name: b['last_name'] ? String(b['last_name']).trim() : null,
+            email,
+            phone_direct: phone,
+            title: b['title'] ? String(b['title']).trim() : null,
+            created_by: userId ?? null,
+          })
+          .select('id')
+          .single();
+        if (ctErr || !newCt) throw new ValidationError(`Contact insert failed: ${ctErr?.message ?? 'unknown'}`);
+        contactId = newCt.id;
+      }
+
+      // 3. Lead — choose the entry stage based on what we have.
+      const now = new Date().toISOString();
+      let stage: string;
+      let nextContactAt: string | null = null;
+      if (phone && runPhoneLookup) {
+        stage = 'phone_lookup_pending';
+      } else if (phone) {
+        stage = 'callable';
+        nextContactAt = now;
+      } else {
+        stage = 'email_only';
+      }
+
+      const leadInsert: Record<string, unknown> = {
+        campaign_id: campaignId,
+        contact_id: contactId,
+        company_id: companyId,
+        stage,
+        source,
+        next_contact_at: nextContactAt,
+        created_by: userId ?? null,
+      };
+      if (b['assigned_persona']) leadInsert['assigned_persona'] = String(b['assigned_persona']);
+      if (b['priority'] != null) leadInsert['priority'] = Number(b['priority']);
+      if (b['score'] != null) leadInsert['score'] = Number(b['score']);
+
+      const { data: newLead, error: leadErr } = await supabase
+        .from('leads')
+        .insert(leadInsert)
+        .select('id, stage')
+        .single();
+      if (leadErr || !newLead) throw new ValidationError(`Lead insert failed: ${leadErr?.message ?? 'unknown'}`);
+
+      // 4. Hand off to the pipeline.
+      let phoneLookupJobId: string | null = null;
+      if (phone && runPhoneLookup) {
+        phoneLookupJobId = await enqueuePhoneLookup({ contactId, leadId: newLead.id, phone });
+      }
+      enqueueCrmSync('lead', newLead.id, 'create');
+
+      audit(supabase, logger, req, {
+        action: 'create',
+        entity_type: 'lead',
+        entity_id: newLead.id,
+        changes: { source, stage: newLead.stage, company: companyName, campaign_id: campaignId },
+      });
+
+      logger.info({ leadId: newLead.id, stage: newLead.stage, phoneLookupJobId }, 'Manual lead created');
+      res.status(201).json({
+        lead: { id: newLead.id, stage: newLead.stage, contact_id: contactId, company_id: companyId },
+        phone_lookup_queued: !!phoneLookupJobId,
+      });
     } catch (err) {
       next(err);
     }
