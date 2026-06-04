@@ -25,9 +25,44 @@ export function createElevenLabsWebhookRouter(deps: {
   supabase: SupabaseClient;
   logger: Logger;
   webhookSecret?: string | undefined;
+  /** Our own company name, used as the `seller_company` dynamic-variable default. */
+  sellerCompany?: string | undefined;
 }): Router {
   const router = Router();
-  const { supabase, logger, webhookSecret } = deps;
+  const { supabase, logger, webhookSecret, sellerCompany } = deps;
+
+  /**
+   * The agents' first-message / prompt templates reference dynamic variables.
+   * If ANY referenced variable is missing, ElevenLabs throws error 1008 and the
+   * call hangs up. Outbound supplies these from the lead/company; inbound has no
+   * lead context, so we must still return a safe default for EVERY variable any
+   * agent might reference (the outbound set in
+   * ElevenLabsAgentClient.buildDynamicVariables, plus the inbound caller_* pair).
+   * Known caller info is layered on top of these defaults.
+   */
+  function buildInboundDynamicVariables(known: {
+    firstName?: string | null | undefined;
+    companyName?: string | null | undefined;
+  }): Record<string, string> {
+    const firstName = known.firstName?.trim() || 'there';
+    const companyName = known.companyName?.trim() || 'your company';
+    return {
+      // Inbound-specific (consumed by the receptionist agent greeting).
+      caller_first_name: firstName,
+      caller_company: known.companyName?.trim() ?? '',
+      // Outbound variable set — supplied with safe defaults so a persona agent
+      // assigned to inbound can never 1008 on a missing variable.
+      contact_first_name: firstName,
+      company_name: companyName,
+      caller_name: 'our receptionist',
+      seller_company: sellerCompany?.trim() || 'our company',
+      contact_title: 'there',
+      store_count: 'unknown',
+      current_esl_vendor: 'unknown',
+      current_pos_vendor: 'unknown',
+      retail_vertical: 'retail',
+    };
+  }
 
   router.post('/elevenlabs/conversation-init', async (req: Request, res: Response) => {
     if (webhookSecret) {
@@ -58,20 +93,22 @@ export function createElevenLabsWebhookRouter(deps: {
         conversationId,
       });
 
-      // Respond with dynamic variables so the agent can greet the known caller.
-      const dynamicVariables: Record<string, string> = {
-        caller_first_name: result?.firstName ?? 'there',
-        caller_company: result?.companyName ?? '',
-      };
-
+      // Respond with a COMPLETE set of dynamic variables (caller info layered on
+      // safe defaults) so the agent's first message can never 1008 on a missing var.
       res.status(200).json({
         type: 'conversation_initiation_client_data',
-        dynamic_variables: dynamicVariables,
+        dynamic_variables: buildInboundDynamicVariables({
+          firstName: result?.firstName,
+          companyName: result?.companyName,
+        }),
       });
     } catch (err) {
       logger.error({ err }, 'conversation-init handler failed');
-      // Still return a valid (empty) personalization response so the call proceeds.
-      res.status(200).json({ type: 'conversation_initiation_client_data', dynamic_variables: {} });
+      // Still return a fully-defaulted personalization response so the call proceeds.
+      res.status(200).json({
+        type: 'conversation_initiation_client_data',
+        dynamic_variables: buildInboundDynamicVariables({}),
+      });
     }
   });
 

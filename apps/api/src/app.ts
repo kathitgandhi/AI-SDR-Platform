@@ -88,6 +88,7 @@ export function createApp(): Application {
     supabase,
     logger,
     webhookSecret: env.ELEVENLABS_WEBHOOK_SECRET,
+    sellerCompany: env.COMPANY_NAME,
   }));
   app.use('/webhooks', createSmsWebhookRouter({ supabase, logger }));
 
