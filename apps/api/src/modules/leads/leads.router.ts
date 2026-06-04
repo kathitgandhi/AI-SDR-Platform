@@ -7,20 +7,23 @@ import { enqueueCrmSync } from '../../shared/crm-sync-queue';
 import { enqueueCall } from '../../shared/call-queue';
 import { enqueuePhoneLookup } from '../../shared/phone-lookup-queue';
 import { audit } from '../../shared/audit';
+import { PERSONAS } from '@ai-sdr/core';
 
 interface RouterContext {
   supabase: SupabaseClient;
   logger: Logger;
 }
 
-// The 7 outbound AI SDR personas. 'receptionist' is inbound-only and never used
-// for outbound dialing. Keep in sync with elevenLabsAgentIds in apps/workers.
-const VALID_PERSONAS = ['mike', 'sarah', 'david', 'rachel', 'chris', 'emma', 'daniel'] as const;
+// The outbound AI SDR personas, derived from the shared core registry so the
+// API, the dropdown endpoint, and the worker call logic never drift. The
+// inbound-only 'receptionist' persona is intentionally NOT in PERSONAS, so it's
+// excluded from outbound here automatically.
+const VALID_PERSONAS: string[] = Object.keys(PERSONAS);
 
 /** Validate a caller-supplied persona; returns it lowercased or throws. */
 function requireValidPersona(value: unknown): string {
   const p = String(value ?? '').toLowerCase().trim();
-  if (!(VALID_PERSONAS as readonly string[]).includes(p)) {
+  if (!VALID_PERSONAS.includes(p)) {
     throw new ValidationError(`persona must be one of: ${VALID_PERSONAS.join(', ')}`);
   }
   return p;
@@ -51,6 +54,17 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
     } catch (err) {
       next(err);
     }
+  });
+
+  // GET /api/v1/leads/personas — list selectable outbound AI agents for the
+  // lead-detail dropdown. Static (derived from the shared registry), so no auth
+  // scoping needed. Must be declared before GET /:id so it isn't treated as an id.
+  router.get('/personas', (_req: Request, res: Response) => {
+    const personas = VALID_PERSONAS.map((name) => {
+      const p = PERSONAS[name as keyof typeof PERSONAS];
+      return { name, display_name: p.displayName, tone: p.tone, best_for: p.bestFor };
+    });
+    res.json({ personas });
   });
 
   // GET /api/v1/leads
