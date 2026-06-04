@@ -2,6 +2,7 @@ import { Request, Response, Router } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
 import { validateElevenLabsWebhookSignature } from '@ai-sdr/integrations';
+import { enqueueTranscript } from '../shared/transcript-queue';
 
 /**
  * ElevenLabs webhooks. Replaces the retired Telnyx call-event webhook.
@@ -74,8 +75,12 @@ export function createElevenLabsWebhookRouter(deps: {
     }
   });
 
-  // Optional post-call finalization hook (transcript worker already pulls details
-  // by conversation_id; this is a place to reconcile inbound call status if needed).
+  // Post-call hook. Fires when ElevenLabs finishes a conversation. We enqueue
+  // transcript processing IMMEDIATELY so the lead leaves the `calling` stage the
+  // moment the call actually ends — instead of waiting for the call-executor's
+  // fixed max-duration fallback delay (~10 min). The delayed job remains as a
+  // safety net; the deterministic jobId + worker idempotency guard prevent any
+  // double-processing.
   router.post('/elevenlabs/post-call', async (req: Request, res: Response) => {
     if (webhookSecret) {
       const raw = (req as any).rawBody ? (req as any).rawBody.toString() : JSON.stringify(req.body);
@@ -87,8 +92,57 @@ export function createElevenLabsWebhookRouter(deps: {
         res.status(401).json({ error: 'Invalid signature' });
         return;
       }
+    } else {
+      logger.warn('ELEVENLABS_WEBHOOK_SECRET unset — accepting post-call in dev mode');
     }
-    res.status(200).json({ received: true });
+
+    const body = req.body ?? {};
+    // ElevenLabs wraps the post_call_transcription payload under `data`; the
+    // conversation id may also appear at the top level depending on version.
+    const conversationId: string | undefined =
+      body.data?.conversation_id ??
+      body.conversation_id ??
+      body.data?.call_sid ??
+      body.call_sid;
+
+    // Always 200 quickly — ElevenLabs retries on non-2xx, and the delayed
+    // fallback job covers any case where we can't enqueue here.
+    if (!conversationId) {
+      logger.warn({ type: body.type }, 'post-call webhook missing conversation_id — relying on fallback');
+      res.status(200).json({ received: true, enqueued: false });
+      return;
+    }
+
+    try {
+      const { data: call } = await supabase
+        .from('calls')
+        .select('id, lead_id, status')
+        .eq('elevenlabs_session_id', conversationId)
+        .maybeSingle();
+
+      if (!call || !call.lead_id) {
+        logger.warn({ conversationId }, 'post-call: no matching call row — relying on fallback');
+        res.status(200).json({ received: true, enqueued: false });
+        return;
+      }
+
+      if (call.status === 'completed') {
+        logger.info({ conversationId, callId: call.id }, 'post-call: call already processed — skipping');
+        res.status(200).json({ received: true, enqueued: false, alreadyProcessed: true });
+        return;
+      }
+
+      const jobId = await enqueueTranscript({
+        callId: call.id,
+        leadId: call.lead_id,
+        conversationId,
+      });
+      logger.info({ conversationId, callId: call.id, jobId }, 'post-call: enqueued transcript processing');
+      res.status(200).json({ received: true, enqueued: true, jobId });
+    } catch (err) {
+      logger.error({ err, conversationId }, 'post-call: failed to enqueue transcript — relying on fallback');
+      res.status(200).json({ received: true, enqueued: false });
+    }
   });
 
   return router;
