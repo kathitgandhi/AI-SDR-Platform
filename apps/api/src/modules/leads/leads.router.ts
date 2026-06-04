@@ -13,6 +13,19 @@ interface RouterContext {
   logger: Logger;
 }
 
+// The 7 outbound AI SDR personas. 'receptionist' is inbound-only and never used
+// for outbound dialing. Keep in sync with elevenLabsAgentIds in apps/workers.
+const VALID_PERSONAS = ['mike', 'sarah', 'david', 'rachel', 'chris', 'emma', 'daniel'] as const;
+
+/** Validate a caller-supplied persona; returns it lowercased or throws. */
+function requireValidPersona(value: unknown): string {
+  const p = String(value ?? '').toLowerCase().trim();
+  if (!(VALID_PERSONAS as readonly string[]).includes(p)) {
+    throw new ValidationError(`persona must be one of: ${VALID_PERSONAS.join(', ')}`);
+  }
+  return p;
+}
+
 export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
   const router = Router();
 
@@ -304,9 +317,22 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
       const phone = (req.body?.phone as string | undefined) ?? contact?.['phone_direct'] ?? contact?.['phone_hq'] ?? null;
       if (!phone) throw new ValidationError('No callable phone number on this lead');
 
-      // Inbound-only 'receptionist' is never used for outbound; default to an SDR.
-      const rawPersona = (l['assigned_persona'] as string | null) ?? 'sarah';
-      const persona = rawPersona === 'receptionist' ? 'sarah' : rawPersona;
+      // Persona selection priority:
+      //  1. Explicit override in the request body (frontend "call as <agent>")
+      //  2. The lead's stored assigned_persona
+      //  3. Default 'sarah' ('receptionist' is inbound-only — never outbound)
+      let persona: string;
+      if (req.body?.persona !== undefined && req.body?.persona !== null && req.body?.persona !== '') {
+        persona = requireValidPersona(req.body.persona);
+        // Persist the choice so future auto-dials use the same agent.
+        await supabase
+          .from('leads')
+          .update({ assigned_persona: persona, updated_at: new Date().toISOString() })
+          .eq('id', l['id'] as string);
+      } else {
+        const rawPersona = (l['assigned_persona'] as string | null) ?? 'sarah';
+        persona = rawPersona === 'receptionist' ? 'sarah' : rawPersona;
+      }
       const attemptNumber = ((l['call_attempts'] as number | null) ?? 0) + 1;
 
       const jobId = await enqueueCall({
@@ -331,7 +357,30 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
     }
   });
 
-  // POST /api/v1/leads/bulk-update — body: { lead_ids: [], updates: { stage?, campaign_id? } }
+  // PATCH /api/v1/leads/:id/persona — assign the AI agent for this lead WITHOUT
+  // dialing. body: { persona: 'mike' | 'sarah' | ... }. The next call (manual or
+  // automatic) uses this agent.
+  router.patch('/:id/persona', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = getUserId(req);
+      const persona = requireValidPersona(req.body?.persona);
+
+      let q = supabase
+        .from('leads')
+        .update({ assigned_persona: persona, updated_at: new Date().toISOString() })
+        .eq('id', req.params.id);
+      if (userId) q = q.eq('created_by', userId);
+      const { data, error } = await q.select('id, assigned_persona').single();
+      if (error || !data) throw new NotFoundError('Lead', req.params.id);
+
+      logger.info({ leadId: req.params.id, persona }, 'Lead agent assigned');
+      res.json({ lead: data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /api/v1/leads/bulk-update — body: { lead_ids: [], updates: { stage?, campaign_id?, assigned_persona? } }
   router.post('/bulk-update', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = getUserId(req);
@@ -339,10 +388,14 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
       if (!Array.isArray(lead_ids) || lead_ids.length === 0) throw new ValidationError('lead_ids array required');
       if (!updates || Object.keys(updates).length === 0) throw new ValidationError('updates object required');
 
-      const allowedFields = ['stage', 'campaign_id', 'score', 'priority', 'next_contact_at'];
+      const allowedFields = ['stage', 'campaign_id', 'score', 'priority', 'next_contact_at', 'assigned_persona'];
       const safe: Record<string, unknown> = { updated_at: new Date().toISOString() };
       for (const k of allowedFields) {
         if (updates[k] !== undefined) safe[k] = updates[k];
+      }
+      // Validate persona if the caller is reassigning the agent in bulk.
+      if (safe['assigned_persona'] !== undefined) {
+        safe['assigned_persona'] = requireValidPersona(safe['assigned_persona']);
       }
 
       let q = supabase.from('leads').update(safe).in('id', lead_ids);
