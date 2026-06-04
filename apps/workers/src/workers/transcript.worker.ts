@@ -236,13 +236,35 @@ async function enrollInEmailSequence(
   if (!sequence) return;
   const { data: existing } = await supabase.from('contact_sequences').select('id').eq('contact_id', contactId).eq('sequence_id', sequence.id).maybeSingle();
   if (existing) return;
-  const nextSendAt = new Date(); nextSendAt.setHours(nextSendAt.getHours() + 2);
+
+  // Honour the FIRST step's own timing instead of a blanket +2h delay. This is
+  // what lets a meeting_confirmation (step 1 delay 0d/0h) go out promptly after
+  // the call, while cold/no-answer steps keep their intended lead time. Mirrors
+  // computeNextSendAt() in email-sequence.worker.ts.
+  const { data: firstStep } = await supabase
+    .from('sequence_steps')
+    .select('step_number, delay_days, delay_hours, send_time_hour, send_time_minute')
+    .eq('sequence_id', sequence.id)
+    .eq('is_active', true)
+    .order('step_number', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  const startStep = firstStep?.step_number ?? 1;
+  const nextSendAt = new Date();
+  nextSendAt.setDate(nextSendAt.getDate() + (firstStep?.delay_days ?? 0));
+  nextSendAt.setHours(nextSendAt.getHours() + (firstStep?.delay_hours ?? 0));
+  if (firstStep?.send_time_hour != null) {
+    nextSendAt.setHours(firstStep.send_time_hour, firstStep.send_time_minute ?? 0, 0, 0);
+  }
+  const delayMs = Math.max(0, nextSendAt.getTime() - Date.now());
+
   const { data: enrollment } = await supabase.from('contact_sequences').insert({
     contact_id: contactId, lead_id: leadId, sequence_id: sequence.id, campaign_id: campaignId,
     trigger_event: sequenceName, trigger_call_id: triggerCallId, next_send_at: nextSendAt.toISOString(),
-    current_step: 1, status: 'active',
+    current_step: startStep, status: 'active',
   }).select().single();
   if (enrollment) {
-    await emailSequenceQueue.add('process-sequence', { contactSequenceId: enrollment.id }, { delay: 2 * 60 * 60 * 1000 });
+    await emailSequenceQueue.add('process-sequence', { contactSequenceId: enrollment.id }, { delay: delayMs });
   }
 }
