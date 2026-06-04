@@ -4,7 +4,7 @@ import { Logger } from 'pino';
 import { createCrmAdapter, AirDesk360Adapter } from '@ai-sdr/integrations';
 import { env } from '../../config/env';
 import { ValidationError, NotFoundError } from '../../shared/errors';
-import { getUserId } from '../../shared/user-scope';
+import { getReadScopeUserId } from '../../shared/user-scope';
 import { audit } from '../../shared/audit';
 
 interface RouterContext {
@@ -46,7 +46,7 @@ export function createCrmRouter({ supabase, logger }: RouterContext): Router {
   // POST /api/v1/crm/sync/lead/:id — push one of our leads to the CRM
   router.post('/sync/lead/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       let q = supabase
         .from('leads')
         .select('*, contacts(*), companies(*)')
@@ -143,7 +143,7 @@ export function createCrmRouter({ supabase, logger }: RouterContext): Router {
   // POST /api/v1/crm/sync/ticket/:id — push one of our tickets to AirDesk360
   router.post('/sync/ticket/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       let q = supabase
         .from('tickets')
         .select('*, contacts(first_name, last_name, email)')

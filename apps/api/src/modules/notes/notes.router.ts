@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
 import { NotFoundError, ValidationError } from '../../shared/errors';
-import { getUserId } from '../../shared/user-scope';
+import { getUserId, getReadScopeUserId } from '../../shared/user-scope';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -15,7 +15,7 @@ export function createNotesRouter({ supabase, logger }: RouterContext): Router {
   // GET /api/v1/notes?lead_id=&call_id=
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       const { lead_id, call_id } = req.query as Record<string, string>;
       if (!lead_id && !call_id) throw new ValidationError('lead_id or call_id required');
 

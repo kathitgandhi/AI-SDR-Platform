@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
 import { NotFoundError, ValidationError } from '../../shared/errors';
-import { getUserId } from '../../shared/user-scope';
+import { getUserId, getReadScopeUserId } from '../../shared/user-scope';
 import { audit } from '../../shared/audit';
 
 interface RouterContext {
@@ -16,7 +16,7 @@ export function createDncRouter({ supabase, logger }: RouterContext): Router {
   // GET /api/v1/dnc?type=phone|email&q=search
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       const { type, q, limit = '100', offset = '0' } = req.query as Record<string, string>;
 
       let query = supabase

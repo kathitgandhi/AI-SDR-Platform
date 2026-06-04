@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
 import { NotFoundError, ValidationError } from '../../shared/errors';
-import { getUserId } from '../../shared/user-scope';
+import { getUserId, getReadScopeUserId } from '../../shared/user-scope';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -15,7 +15,7 @@ export function createTicketsRouter({ supabase, logger }: RouterContext): Router
   // GET /api/v1/tickets?status=&priority=&lead_id=
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       const { status, priority, lead_id, contact_id, company_id, call_id, limit = '50', offset = '0' } =
         req.query as Record<string, string>;
 
@@ -51,7 +51,7 @@ export function createTicketsRouter({ supabase, logger }: RouterContext): Router
   // GET /api/v1/tickets/:id
   router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       let q = supabase
         .from('tickets')
         .select(`*, contacts(*), companies(*)`)

@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
 import { NotFoundError, ValidationError } from '../../shared/errors';
-import { getUserId } from '../../shared/user-scope';
+import { getUserId, getReadScopeUserId } from '../../shared/user-scope';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -15,7 +15,7 @@ export function createCallsRouter({ supabase, logger }: RouterContext): Router {
   // GET /api/v1/calls/meetings — must be before /:id
   router.get('/meetings', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       const { status, limit = '50', offset = '0' } = req.query as Record<string, string>;
 
       let query = supabase
@@ -72,7 +72,7 @@ export function createCallsRouter({ supabase, logger }: RouterContext): Router {
   // GET /api/v1/calls
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       const {
         persona, outcome, campaign_id,
         limit = '50', offset = '0',
@@ -150,7 +150,7 @@ export function createCallsRouter({ supabase, logger }: RouterContext): Router {
   // GET /api/v1/calls/:id/transcript
   router.get('/:id/transcript', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       let q = supabase
         .from('calls')
         .select(`

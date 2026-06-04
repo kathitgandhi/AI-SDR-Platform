@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
 import { NotFoundError, ValidationError } from '../../shared/errors';
-import { getUserId } from '../../shared/user-scope';
+import { getUserId, getReadScopeUserId } from '../../shared/user-scope';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -15,7 +15,7 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
   // GET /api/v1/campaigns
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       let query = supabase
         .from('campaigns')
         .select(`
@@ -38,7 +38,7 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
   // GET /api/v1/campaigns/:id
   router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       let query = supabase.from('campaigns').select('*').eq('id', req.params.id);
       if (userId) query = query.eq('created_by', userId);
       const { data: campaign, error } = await query.single();
