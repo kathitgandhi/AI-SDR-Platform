@@ -4,10 +4,13 @@ import { getDashboardStats, getRecentCalls, getCampaignSummaries, getAgentStats 
 import { StatCard } from '@/components/ui/StatCard';
 import { RecentCallsTable } from '@/components/dashboard/RecentCallsTable';
 import { CampaignStatusTable } from '@/components/dashboard/CampaignStatusTable';
+import { AutoRefresh } from '@/components/dashboard/AutoRefresh';
 import { Header } from '@/components/layout/Header';
 import { format } from 'date-fns';
 
-export const revalidate = 60;
+// Render fresh on every request so router.refresh() (AutoRefresh) returns
+// up-to-date call/meeting data instead of a cached snapshot.
+export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
   const supabase = createClient();
@@ -20,6 +23,7 @@ export default async function DashboardPage() {
 
   return (
     <>
+      <AutoRefresh intervalMs={30000} />
       <Header
         title="Dashboard"
         subtitle={`Today · ${format(new Date(), 'EEEE, MMMM d, yyyy')}`}

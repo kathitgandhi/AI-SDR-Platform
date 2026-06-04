@@ -194,17 +194,31 @@ export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
         workerLogger.warn({ err }, 'Auto-note insert failed (table may not exist yet — run migration 006)');
       }
 
-      // Book appointment if meeting booked
-      if (outcome === 'meeting_booked' && analysisResult?.callAnalysis?.meeting_details?.booked) {
-        const mtg = analysisResult.callAnalysis.meeting_details;
-        await deps.supabase.from('appointments').insert({
-          lead_id: leadId, contact_id: call.contact_id, company_id: call.company_id, call_id: callId,
-          campaign_id: call.campaign_id, scheduled_at: mtg.confirmed_date ?? mtg.proposed_date ?? now,
-          duration_minutes: mtg.duration_minutes ?? 30, timezone: mtg.timezone ?? 'America/New_York',
-          qualification_summary: handoffSummary, key_pain_points: qualData?.pain_points ?? [],
-          store_count: qualData?.store_count ?? null, budget_indication: qualData?.budget_range ?? null,
-          decision_timeline: qualData?.rollout_timeline ?? null,
-        });
+      // Book appointment whenever the call outcome is a booked meeting. We no
+      // longer require structured `meeting_details.booked` — Claude often sets
+      // the outcome to meeting_booked without populating a parsed date/time, and
+      // previously that left the Meetings tab empty for a real booking. When the
+      // date is missing we default to a placeholder (2 days out) so the rep still
+      // sees the meeting and can adjust it.
+      if (outcome === 'meeting_booked') {
+        const mtg = analysisResult?.callAnalysis?.meeting_details;
+        const defaultScheduledAt = new Date();
+        defaultScheduledAt.setDate(defaultScheduledAt.getDate() + 2);
+        const scheduledAt = mtg?.confirmed_date ?? mtg?.proposed_date ?? defaultScheduledAt.toISOString();
+
+        // Defensive idempotency: don't create a second appointment for this call.
+        const { data: existingAppt } = await deps.supabase
+          .from('appointments').select('id').eq('call_id', callId).maybeSingle();
+        if (!existingAppt) {
+          await deps.supabase.from('appointments').insert({
+            lead_id: leadId, contact_id: call.contact_id, company_id: call.company_id, call_id: callId,
+            campaign_id: call.campaign_id, scheduled_at: scheduledAt,
+            duration_minutes: mtg?.duration_minutes ?? 30, timezone: mtg?.timezone ?? 'America/New_York',
+            qualification_summary: handoffSummary, key_pain_points: qualData?.pain_points ?? [],
+            store_count: qualData?.store_count ?? null, budget_indication: qualData?.budget_range ?? null,
+            decision_timeline: qualData?.rollout_timeline ?? null,
+          });
+        }
       }
 
       // Enroll in email sequence
