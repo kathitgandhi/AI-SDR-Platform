@@ -236,13 +236,28 @@ async function enrollInEmailSequence(
   if (!sequence) return;
   const { data: existing } = await supabase.from('contact_sequences').select('id').eq('contact_id', contactId).eq('sequence_id', sequence.id).maybeSingle();
   if (existing) return;
-  const nextSendAt = new Date(); nextSendAt.setHours(nextSendAt.getHours() + 2);
+
+  // Send the FIRST email immediately (no delay). The email-sequence worker
+  // schedules subsequent steps from their own delay_days/delay_hours config, so
+  // only the first send is forced to "now"; later steps keep their lead time.
+  const { data: firstStep } = await supabase
+    .from('sequence_steps')
+    .select('step_number')
+    .eq('sequence_id', sequence.id)
+    .eq('is_active', true)
+    .order('step_number', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  const startStep = firstStep?.step_number ?? 1;
+  const nextSendAt = new Date();
+
   const { data: enrollment } = await supabase.from('contact_sequences').insert({
     contact_id: contactId, lead_id: leadId, sequence_id: sequence.id, campaign_id: campaignId,
     trigger_event: sequenceName, trigger_call_id: triggerCallId, next_send_at: nextSendAt.toISOString(),
-    current_step: 1, status: 'active',
+    current_step: startStep, status: 'active',
   }).select().single();
   if (enrollment) {
-    await emailSequenceQueue.add('process-sequence', { contactSequenceId: enrollment.id }, { delay: 2 * 60 * 60 * 1000 });
+    await emailSequenceQueue.add('process-sequence', { contactSequenceId: enrollment.id }, { delay: 0 });
   }
 }

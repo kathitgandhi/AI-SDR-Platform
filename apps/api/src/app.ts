@@ -47,7 +47,9 @@ export function createApp(): Application {
 
   // --- Webhook body parsing + raw body for signature validation ---
   // JSON webhooks (ElevenLabs) keep their raw body for HMAC signature checks.
-  app.use('/webhooks', express.raw({ type: 'application/json' }), (req, _, next) => {
+  // ElevenLabs post-call transcription webhooks can be ~1.5MB; the default
+  // express.raw limit (~100KB) would 413 them. Raise to 10mb.
+  app.use('/webhooks', express.raw({ type: 'application/json', limit: '10mb' }), (req, _, next) => {
     if (Buffer.isBuffer(req.body)) {
       (req as express.Request & { rawBody: Buffer }).rawBody = req.body;
       req.body = JSON.parse(req.body.toString());

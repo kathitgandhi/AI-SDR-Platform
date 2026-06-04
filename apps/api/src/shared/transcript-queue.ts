@@ -29,16 +29,16 @@ function getQueue(): Queue {
  * post-call webhook so a lead leaves the `calling` stage the moment the call
  * actually ends, instead of waiting for the fixed max-duration fallback delay.
  *
- * Uses a deterministic jobId keyed on the conversation id so this webhook-driven
- * job and the call-executor's delayed fallback job collapse into one while either
- * is still queued (BullMQ ignores a duplicate jobId). The transcript worker also
- * guards against re-processing an already-completed call, covering the case where
- * the first job has already finished and been removed.
+ * IMPORTANT: this job must NOT share a jobId with the call-executor's delayed
+ * fallback job. BullMQ treats `add()` with an already-existing jobId as a no-op
+ * (it will not override the still-queued delayed job), which would silently drop
+ * this immediate enqueue and leave the lead stuck in `calling` until the ~10-min
+ * fallback fired. Instead we let this job run on its own auto-generated id; the
+ * transcript worker's `status === 'completed'` idempotency guard prevents the
+ * later delayed fallback from re-processing the same call.
  */
 export async function enqueueTranscript(payload: TranscriptProcessPayload): Promise<string> {
   const job = await getQueue().add('process-transcript', payload, {
-    // BullMQ custom job IDs may NOT contain ':' (Redis key separator) — use '-'.
-    jobId: `transcript-${payload.conversationId}`,
     delay: 0,
     attempts: 3,
     backoff: { type: 'exponential', delay: 5000 },
