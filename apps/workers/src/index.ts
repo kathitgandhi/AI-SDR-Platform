@@ -11,8 +11,11 @@ import { createEmailSenderWorker } from './workers/email-sender.worker';
 import { createCrmSyncWorker } from './workers/crm-sync.worker';
 import { createLeadImportWorker } from './workers/lead-import.worker';
 import { createEmailSequenceWorker } from './workers/email-sequence.worker';
-import { ElevenLabsAgentClient, ClaudeReasoningService, GmailClient, ZoomInfoClient } from '@ai-sdr/integrations';
+import { createPhoneLookupWorker } from './workers/phone-lookup.worker';
+import { createPipelineScheduler } from './workers/pipeline-scheduler';
+import { ElevenLabsAgentClient, ClaudeReasoningService, GmailClient, ZoomInfoClient, TwilioLookupClient } from '@ai-sdr/integrations';
 import { DncChecker, TimezoneGuard, CallOutcomeScorer } from '@ai-sdr/core';
+import { elevenLabsAgentIds } from './config/env';
 
 const logger = pino({ level: workerEnv.LOG_LEVEL });
 const workerTypes = workerEnv.WORKER_TYPES.split(',').map(s => s.trim()).filter(Boolean);
@@ -148,6 +151,39 @@ async function bootstrap(): Promise<void> {
       }));
       logger.info({ auth: hasPki ? 'pki' : 'basic' }, 'Lead import (ZoomInfo) worker started');
     }
+  }
+
+  if (workerTypes.includes('phone-lookup')) {
+    const lookupClient = new TwilioLookupClient(workerEnv.TWILIO_ACCOUNT_SID, workerEnv.TWILIO_AUTH_TOKEN, logger);
+    workers.push(createPhoneLookupWorker({
+      supabase,
+      lookupClient,
+      dncChecker,
+      connection: redis,
+      logger,
+      config: { strict: workerEnv.PHONE_LOOKUP_STRICT === 'true' },
+    }));
+    logger.info({ strict: workerEnv.PHONE_LOOKUP_STRICT === 'true' }, 'Phone-lookup worker started');
+  }
+
+  if (workerTypes.includes('scheduler')) {
+    workers.push(createPipelineScheduler({
+      supabase,
+      redis,
+      leadImportQueue: queues[QUEUE_NAMES.LEAD_IMPORT],
+      callExecuteQueue: queues[QUEUE_NAMES.CALL_EXECUTE],
+      timezoneGuard,
+      logger,
+      config: {
+        dialIntervalMs: workerEnv.PIPELINE_DIAL_INTERVAL_MS,
+        importIntervalMs: workerEnv.PIPELINE_IMPORT_INTERVAL_MS,
+        minLeadBuffer: workerEnv.PIPELINE_MIN_LEAD_BUFFER,
+        importCooldownMs: workerEnv.PIPELINE_IMPORT_COOLDOWN_MS,
+        dialBatch: workerEnv.PIPELINE_DIAL_BATCH,
+        availablePersonas: Object.keys(elevenLabsAgentIds),
+      },
+    }));
+    logger.info('Pipeline scheduler started');
   }
 
   logger.info({ count: workers.length }, 'All workers started');
