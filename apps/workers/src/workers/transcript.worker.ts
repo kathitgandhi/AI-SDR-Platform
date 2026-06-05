@@ -19,6 +19,9 @@ interface TranscriptWorkerDeps {
   crmSyncQueue: Queue;
   connection: Redis;
   logger: Logger;
+  /** Per-minute voice cost rates (USD), used to record per-call telephony +
+   *  voice-agent spend into api_usage. Sourced from worker env. */
+  costRates: { elevenLabsPerMinuteUsd: number; twilioPerMinuteUsd: number };
 }
 
 export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
@@ -85,6 +88,35 @@ export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
         });
       } catch (err) {
         workerLogger.error({ err }, 'Claude analysis failed');
+      }
+
+      // Record per-call voice spend (ElevenLabs voice agent + Twilio telephony).
+      // Both are billed by duration, so we approximate from the call's billed
+      // seconds × the configured per-minute rate and store them in api_usage
+      // keyed to this call. Combined with the anthropic row above, this lets the
+      // call-detail endpoint report an all-in total per call. Never let a cost
+      // bookkeeping failure break call processing.
+      if (callDurationSecs > 0) {
+        try {
+          const billedMinutes = Number((callDurationSecs / 60).toFixed(4));
+          const durationMs = callDurationSecs * 1000;
+          await deps.supabase.from('api_usage').insert([
+            {
+              provider: 'elevenlabs', operation: 'voice_agent_call',
+              entity_type: 'call', entity_id: callId,
+              units_consumed: billedMinutes, duration_ms: durationMs,
+              cost_usd: Number((billedMinutes * deps.costRates.elevenLabsPerMinuteUsd).toFixed(6)),
+            },
+            {
+              provider: 'twilio', operation: 'voice_call',
+              entity_type: 'call', entity_id: callId,
+              units_consumed: billedMinutes, duration_ms: durationMs,
+              cost_usd: Number((billedMinutes * deps.costRates.twilioPerMinuteUsd).toFixed(6)),
+            },
+          ]);
+        } catch (err) {
+          workerLogger.warn({ err }, 'Failed to record voice cost usage');
+        }
       }
 
       const outcome = (analysisResult?.callAnalysis?.outcome ?? 'no_answer') as CallOutcome;

@@ -36,6 +36,16 @@ const workerEnvSchema = z.object({
   CALL_WINDOW_START_HOUR: z.coerce.number().default(8),
   CALL_WINDOW_END_HOUR: z.coerce.number().default(21),
 
+  // --- Per-minute voice cost rates (USD) used to record per-call spend ---
+  // Plan-specific, so they're configurable. Defaults are rough list prices:
+  //  - ElevenLabs Conversational AI ~ $0.10/min (varies by plan/credits)
+  //  - Twilio US outbound voice     ~ $0.014/min
+  // These are multiplied by the call's billed duration and written to
+  // api_usage (entity_type='call') alongside the Claude analysis cost, so the
+  // call-detail endpoint can report an all-in total per call.
+  ELEVENLABS_COST_PER_MINUTE_USD: z.coerce.number().default(0.10),
+  TWILIO_VOICE_COST_PER_MINUTE_USD: z.coerce.number().default(0.014),
+
   // --- Pipeline scheduler (auto-dial + auto-import) ---
   // How often the autonomous engine scans active campaigns to dial leads / top
   // up the lead pool. Only used when WORKER_TYPES includes 'scheduler'.

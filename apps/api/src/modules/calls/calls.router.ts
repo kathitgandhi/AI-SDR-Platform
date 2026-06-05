@@ -174,7 +174,31 @@ export function createCallsRouter({ supabase, logger }: RouterContext): Router {
         .eq('call_id', req.params.id)
         .single();
 
-      res.json({ call, transcript: transcript ?? null });
+      // All-in cost for this call: every api_usage row recorded against it
+      // (anthropic transcript analysis + elevenlabs voice agent + twilio voice).
+      const { data: usage } = await supabase
+        .from('api_usage')
+        .select('provider, operation, cost_usd, units_consumed')
+        .eq('entity_type', 'call')
+        .eq('entity_id', req.params.id);
+
+      const byProvider: Record<string, number> = {};
+      let totalUsd = 0;
+      for (const row of usage ?? []) {
+        const c = Number(row.cost_usd ?? 0);
+        byProvider[row.provider] = (byProvider[row.provider] ?? 0) + c;
+        totalUsd += c;
+      }
+      const cost = {
+        total_usd: Number(totalUsd.toFixed(6)),
+        by_provider: Object.entries(byProvider).map(([provider, cost_usd]) => ({
+          provider,
+          cost_usd: Number(cost_usd.toFixed(6)),
+        })),
+        line_items: usage ?? [],
+      };
+
+      res.json({ call, transcript: transcript ?? null, cost });
     } catch (err) {
       next(err);
     }
