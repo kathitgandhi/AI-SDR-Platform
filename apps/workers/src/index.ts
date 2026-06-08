@@ -62,6 +62,10 @@ async function bootstrap(): Promise<void> {
       emailSequenceQueue: queues[QUEUE_NAMES.EMAIL_SEQUENCE],
       crmSyncQueue: queues[QUEUE_NAMES.CRM_SYNC],
       connection: redis, logger,
+      costRates: {
+        elevenLabsPerMinuteUsd: workerEnv.ELEVENLABS_COST_PER_MINUTE_USD,
+        twilioPerMinuteUsd: workerEnv.TWILIO_VOICE_COST_PER_MINUTE_USD,
+      },
     }));
     logger.info('Transcript worker started');
   }
