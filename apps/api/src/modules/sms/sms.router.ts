@@ -4,7 +4,7 @@ import { Logger } from 'pino';
 import { TwilioSmsClient, validateTwilioWebhookSignature, TwilioInboundSmsPayload } from '@ai-sdr/integrations';
 import { env } from '../../config/env';
 import { NotFoundError, ValidationError } from '../../shared/errors';
-import { getUserId } from '../../shared/user-scope';
+import { getUserId, getReadScopeUserId } from '../../shared/user-scope';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -18,7 +18,7 @@ export function createSmsRouter({ supabase, logger }: RouterContext): Router {
   // GET /api/v1/sms?contact_id=&direction=
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       const { contact_id, lead_id, direction, limit = '100' } =
         req.query as Record<string, string>;
 
@@ -44,7 +44,7 @@ export function createSmsRouter({ supabase, logger }: RouterContext): Router {
   // Returns latest message per contact (for thread-list UI)
   router.get('/threads', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       let q = supabase
         .from('sms_messages')
         .select('contact_id, from_number, to_number, body, direction, created_at, contacts(id, first_name, last_name, phone_direct, companies(name))')

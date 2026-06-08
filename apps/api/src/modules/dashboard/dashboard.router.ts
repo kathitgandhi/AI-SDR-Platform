@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
-import { getUserId } from '../../shared/user-scope';
+import { getReadScopeUserId } from '../../shared/user-scope';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -14,7 +14,7 @@ export function createDashboardRouter({ supabase }: RouterContext): Router {
   // GET /api/v1/dashboard
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       const scope = <T>(q: T): T => (userId ? (q as any).eq('created_by', userId) : q);
 
       const today = new Date();

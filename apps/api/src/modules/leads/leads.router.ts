@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { Logger } from 'pino';
 import { NotFoundError, ValidationError } from '../../shared/errors';
-import { getUserId } from '../../shared/user-scope';
+import { getUserId, getReadScopeUserId } from '../../shared/user-scope';
 import { enqueueCrmSync } from '../../shared/crm-sync-queue';
 import { enqueueCall } from '../../shared/call-queue';
 import { enqueuePhoneLookup } from '../../shared/phone-lookup-queue';
@@ -35,7 +35,7 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
   // GET /api/v1/leads/hot — must be before /:id
   router.get('/hot', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       let query = supabase
         .from('leads')
         .select(`
@@ -70,7 +70,7 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
   // GET /api/v1/leads
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       const {
         stage, score_min, vertical, company, campaign_id,
         limit = '50', offset = '0',
@@ -248,7 +248,7 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
   // GET /api/v1/leads/:id
   router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = getUserId(req);
+      const userId = getReadScopeUserId(req);
       let query = supabase
         .from('leads')
         .select(`*, contacts(*), companies(*)`)
