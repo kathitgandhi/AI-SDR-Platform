@@ -41,7 +41,7 @@ services:
     env_file: .env
     environment:
       - NODE_ENV=production
-      - WORKER_TYPES=lead-import,enrichment,phone-lookup,email-sender,email-sequence,reporting,crm-sync
+      - WORKER_TYPES=lead-import,enrichment,phone-lookup,email-sender,email-sequence,reporting,crm-sync,scheduler
     depends_on:
       - redis
 
