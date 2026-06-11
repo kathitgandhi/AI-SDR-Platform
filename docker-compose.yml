@@ -65,7 +65,9 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # noeviction (not allkeys-lru): BullMQ requires that Redis never evict keys,
+    # or queued/active jobs can be silently dropped under memory pressure.
+    command: redis-server --maxmemory 512mb --maxmemory-policy noeviction
     volumes:
       - redis-data:/data
 

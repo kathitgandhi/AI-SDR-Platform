@@ -32,6 +32,11 @@ import WebSocket from 'ws';
 export function createApp(): Application {
   const app = express();
 
+  // Behind Caddy (reverse proxy) the client IP arrives in X-Forwarded-For.
+  // Trust the first proxy hop so express-rate-limit identifies clients by their
+  // real IP instead of throwing ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+  app.set('trust proxy', 1);
+
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     realtime: { transport: WebSocket as any },
   });
