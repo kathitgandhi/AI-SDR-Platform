@@ -64,6 +64,7 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
           enabled_personas, total_leads, calls_made, meetings_booked, emails_sent,
           started_at, paused_at, completed_at, created_at, updated_at
         `)
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
       if (userId) query = query.eq('created_by', userId);
 
@@ -79,7 +80,7 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
   router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userId = getReadScopeUserId(req);
-      let query = supabase.from('campaigns').select('*').eq('id', req.params.id);
+      let query = supabase.from('campaigns').select('*').eq('id', req.params.id).is('deleted_at', null);
       if (userId) query = query.eq('created_by', userId);
       const { data: campaign, error } = await query.single();
 
@@ -208,6 +209,61 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
 
       if (error || !data) throw new NotFoundError('Campaign', req.params.id);
       res.json({ campaign: data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // PATCH /api/v1/campaigns/:id — edit general fields
+  router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = getUserId(req);
+      const b = req.body as Record<string, unknown>;
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+
+      if (b['name'] !== undefined) updates['name'] = b['name'];
+      if (b['description'] !== undefined) updates['description'] = b['description'];
+      if (b['target_titles'] !== undefined) updates['target_titles'] = b['target_titles'];
+      if (b['daily_call_limit'] !== undefined) updates['daily_call_limit'] = b['daily_call_limit'];
+      if (b['hourly_call_limit'] !== undefined) updates['hourly_call_limit'] = b['hourly_call_limit'];
+      if (b['max_concurrent_calls'] !== undefined) updates['max_concurrent_calls'] = b['max_concurrent_calls'];
+      const verticals = normalizeEnumArray(b['target_verticals'], VALID_VERTICALS, 'target_verticals');
+      if (verticals !== undefined) updates['target_verticals'] = verticals;
+      const personas = normalizeEnumArray(b['enabled_personas'], VALID_PERSONAS, 'enabled_personas');
+      if (personas !== undefined) updates['enabled_personas'] = personas;
+      if (b['status'] !== undefined) {
+        const status = toEnumValue(b['status']);
+        if (!VALID_STATUSES.includes(status)) {
+          throw new ValidationError(`Invalid status "${b['status']}". Valid values: ${VALID_STATUSES.join(', ')}`);
+        }
+        updates['status'] = status;
+      }
+
+      let query = supabase.from('campaigns').update(updates).eq('id', req.params.id).is('deleted_at', null);
+      if (userId) query = query.eq('created_by', userId);
+      const { data, error } = await query.select().single();
+      if (error || !data) throw new NotFoundError('Campaign', req.params.id);
+      logger.info({ campaignId: req.params.id }, 'Campaign updated');
+      res.json({ campaign: data });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // DELETE /api/v1/campaigns/:id — soft delete (reversible; hard delete is
+  // blocked by RESTRICT FKs on calls/leads and would destroy history).
+  router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = getUserId(req);
+      const now = new Date().toISOString();
+      let query = supabase.from('campaigns')
+        .update({ deleted_at: now, status: 'archived', updated_at: now })
+        .eq('id', req.params.id).is('deleted_at', null);
+      if (userId) query = query.eq('created_by', userId);
+      const { data, error } = await query.select('id').single();
+      if (error || !data) throw new NotFoundError('Campaign', req.params.id);
+      logger.info({ campaignId: req.params.id }, 'Campaign soft-deleted');
+      res.json({ success: true, id: req.params.id });
     } catch (err) {
       next(err);
     }
