@@ -4,6 +4,7 @@ import { Logger } from 'pino';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { EmailSequenceType } from '@ai-sdr/integrations';
 import { QUEUE_NAMES } from '../queues/queue.registry';
+import { enrollContactInSequence } from '../shared/email-enrollment';
 import type { EmailSendJobPayload } from './email-sender.worker';
 
 /**
@@ -13,6 +14,18 @@ import type { EmailSendJobPayload } from './email-sender.worker';
  */
 export interface ProcessSequenceJobPayload {
   contactSequenceId: string;
+}
+
+/**
+ * `enroll` job, enqueued by the API when a lead is added directly as email_only
+ * (no call to trigger post-call enrollment). The worker enrolls the contact and
+ * fires the first email immediately.
+ */
+export interface EnrollJobPayload {
+  leadId: string;
+  contactId: string;
+  campaignId: string | null;
+  sequenceName: string;
 }
 
 interface EmailSequenceDeps {
@@ -72,10 +85,23 @@ export function createEmailSequenceWorker(deps: EmailSequenceDeps): Worker {
   const { supabase, emailSenderQueue, sequenceQueue, connection, logger } = deps;
   const workerLogger = logger.child({ worker: 'email-sequence' });
 
-  return new Worker<ProcessSequenceJobPayload>(
+  return new Worker<ProcessSequenceJobPayload | EnrollJobPayload>(
     QUEUE_NAMES.EMAIL_SEQUENCE,
-    async (job: Job<ProcessSequenceJobPayload>) => {
-      const { contactSequenceId } = job.data;
+    async (job: Job<ProcessSequenceJobPayload | EnrollJobPayload>) => {
+      // `enroll` jobs (from the API for email_only leads) create the enrollment
+      // then enqueue a `process-sequence` job to send the first email.
+      if (job.name === 'enroll') {
+        const p = job.data as EnrollJobPayload;
+        const enrollLogger = workerLogger.child({ jobId: job.id, leadId: p.leadId });
+        await enrollContactInSequence(supabase, sequenceQueue, {
+          leadId: p.leadId, contactId: p.contactId, campaignId: p.campaignId ?? null,
+          sequenceName: p.sequenceName,
+        });
+        enrollLogger.info({ sequenceName: p.sequenceName }, 'Enrolled email_only lead into sequence');
+        return { enrolled: true };
+      }
+
+      const { contactSequenceId } = job.data as ProcessSequenceJobPayload;
       const jobLogger = workerLogger.child({ jobId: job.id, contactSequenceId });
 
       // 1. Load the enrollment

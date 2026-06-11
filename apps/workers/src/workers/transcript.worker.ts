@@ -8,6 +8,7 @@ import { CallOutcomeScorer, DncChecker } from '@ai-sdr/core';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { CallOutcome } from '@ai-sdr/database';
 import type { ElevenLabsTranscriptMessage } from '@ai-sdr/integrations';
+import { enrollContactInSequence } from '../shared/email-enrollment';
 
 interface TranscriptWorkerDeps {
   supabase: SupabaseClient;
@@ -255,7 +256,10 @@ export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
 
       // Enroll in email sequence
       if (scoredOutcome.sequenceToTrigger) {
-        await enrollInEmailSequence(deps.supabase, deps.emailSequenceQueue, leadId, call.contact_id, call.campaign_id, callId, scoredOutcome.sequenceToTrigger);
+        await enrollContactInSequence(deps.supabase, deps.emailSequenceQueue, {
+          leadId, contactId: call.contact_id, campaignId: call.campaign_id,
+          sequenceName: scoredOutcome.sequenceToTrigger, triggerCallId: callId,
+        });
       }
 
       await deps.crmSyncQueue.add('sync-lead', { entity: 'lead', entityId: leadId, action: 'update', provider: process.env['CRM_PROVIDER'] ?? 'none' });
@@ -272,64 +276,4 @@ function extractEmailFromText(text: string): string | null {
   if (!text) return null;
   const match = text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
   return match ? match[0] : null;
-}
-
-async function enrollInEmailSequence(
-  supabase: SupabaseClient, emailSequenceQueue: Queue,
-  leadId: string, contactId: string, campaignId: string | null, triggerCallId: string, sequenceName: string
-): Promise<void> {
-  const { data: sequence } = await supabase.from('email_sequences').select('id').eq('name', sequenceName).eq('is_active', true).maybeSingle();
-  if (!sequence) return;
-
-  // Send the FIRST email immediately (no delay). The email-sequence worker
-  // schedules subsequent steps from their own delay_days/delay_hours config, so
-  // only the first send is forced to "now"; later steps keep their lead time.
-  const { data: firstStep } = await supabase
-    .from('sequence_steps')
-    .select('step_number')
-    .eq('sequence_id', sequence.id)
-    .eq('is_active', true)
-    .order('step_number', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  const startStep = firstStep?.step_number ?? 1;
-  const nextSendAt = new Date();
-
-  // contact_sequences has UNIQUE(contact_id, sequence_id), so a contact can only
-  // hold one enrollment row per sequence. To re-engage on EVERY new call (policy
-  // B), if the contact is already enrolled we RESET that enrollment back to the
-  // first step and re-fire it, rather than skipping. Otherwise insert fresh.
-  const { data: existing } = await supabase
-    .from('contact_sequences')
-    .select('id')
-    .eq('contact_id', contactId)
-    .eq('sequence_id', sequence.id)
-    .maybeSingle();
-
-  let enrollmentId: string | null = null;
-  if (existing) {
-    const { data: reset } = await supabase
-      .from('contact_sequences')
-      .update({
-        lead_id: leadId, campaign_id: campaignId, trigger_event: sequenceName,
-        trigger_call_id: triggerCallId, next_send_at: nextSendAt.toISOString(),
-        current_step: startStep, status: 'active', completed_at: null,
-      })
-      .eq('id', existing.id)
-      .select('id')
-      .single();
-    enrollmentId = reset?.id ?? existing.id;
-  } else {
-    const { data: enrollment } = await supabase.from('contact_sequences').insert({
-      contact_id: contactId, lead_id: leadId, sequence_id: sequence.id, campaign_id: campaignId,
-      trigger_event: sequenceName, trigger_call_id: triggerCallId, next_send_at: nextSendAt.toISOString(),
-      current_step: startStep, status: 'active',
-    }).select('id').single();
-    enrollmentId = enrollment?.id ?? null;
-  }
-
-  if (enrollmentId) {
-    await emailSequenceQueue.add('process-sequence', { contactSequenceId: enrollmentId }, { delay: 0 });
-  }
 }

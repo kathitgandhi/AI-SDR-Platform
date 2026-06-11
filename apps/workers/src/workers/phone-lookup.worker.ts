@@ -1,16 +1,19 @@
-import { Worker, Job } from 'bullmq';
+import { Worker, Job, Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import { Logger } from 'pino';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { TwilioLookupClient } from '@ai-sdr/integrations';
 import { DncChecker } from '@ai-sdr/core';
 import { PhoneLookupJobPayload, QUEUE_NAMES } from '../queues/queue.registry';
+import { enrollContactInSequence, EMAIL_ONLY_SEQUENCE } from '../shared/email-enrollment';
 
 interface PhoneLookupDeps {
   supabase: SupabaseClient;
   /** Twilio Lookup v2 (line_type_intelligence). */
   lookupClient: TwilioLookupClient;
   dncChecker: DncChecker;
+  /** Used to enroll leads routed to email_only into a first-touch email sequence. */
+  emailSequenceQueue: Queue;
   connection: Redis;
   logger: Logger;
   config: {
@@ -38,8 +41,23 @@ interface PhoneLookupDeps {
  * and never advances — so no lead ever becomes callable automatically.
  */
 export function createPhoneLookupWorker(deps: PhoneLookupDeps): Worker {
-  const { supabase, lookupClient, dncChecker, connection, logger, config } = deps;
+  const { supabase, lookupClient, dncChecker, emailSequenceQueue, connection, logger, config } = deps;
   const workerLogger = logger.child({ worker: 'phone-lookup' });
+
+  // When a number can't be called (mobile/voip, or inconclusive in strict mode)
+  // the lead drops to email_only. Enroll it into a first-touch email sequence so
+  // these leads aren't stranded with no outreach. Best-effort — never fail the job.
+  async function enrollIfEmailOnly(stage: string, leadId: string, contactId: string): Promise<void> {
+    if (stage !== 'email_only') return;
+    try {
+      const { data: lead } = await supabase.from('leads').select('campaign_id').eq('id', leadId).maybeSingle();
+      await enrollContactInSequence(supabase, emailSequenceQueue, {
+        leadId, contactId, campaignId: lead?.campaign_id ?? null, sequenceName: EMAIL_ONLY_SEQUENCE,
+      });
+    } catch (err) {
+      workerLogger.warn({ err, leadId }, 'email_only enrollment failed');
+    }
+  }
 
   return new Worker<PhoneLookupJobPayload>(
     QUEUE_NAMES.PHONE_LOOKUP,
@@ -74,6 +92,7 @@ export function createPhoneLookupWorker(deps: PhoneLookupDeps): Worker {
         const stage = contact?.email ? 'email_only' : 'dead';
         jobLogger.info({ lineType: lookup.lineType, stage }, 'Number not callable (mobile/voip)');
         await supabase.from('leads').update({ stage, updated_at: now }).eq('id', leadId);
+        await enrollIfEmailOnly(stage, leadId, contactId);
         return { leadId, result: stage };
       }
 
@@ -85,6 +104,7 @@ export function createPhoneLookupWorker(deps: PhoneLookupDeps): Worker {
         const stage = contact?.email ? 'email_only' : 'dead';
         jobLogger.warn({ stage }, 'Lookup inconclusive + strict mode — not calling');
         await supabase.from('leads').update({ stage, updated_at: now }).eq('id', leadId);
+        await enrollIfEmailOnly(stage, leadId, contactId);
         return { leadId, result: stage };
       }
 
