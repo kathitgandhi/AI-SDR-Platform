@@ -124,6 +124,9 @@ function buildOpenApiSpec() {
       },
       '/api/v1/transfer-rules/transfer-now': { post: { summary: 'Immediate transfer (UI override) on an active call' } },
 
+      '/api/v1/sequences': { get: { summary: 'Email-sequence catalog + steps + active enrollment counts' } },
+      '/api/v1/sequences/enrollments': { get: { summary: 'Contact sequence enrollments — filters: status, lead_id, contact_id, sequence_id' } },
+
       '/api/v1/dnc': {
         get: { summary: 'List DNC entries — filters: type=phone|email, q=' },
         post: { summary: 'Add DNC entry' },

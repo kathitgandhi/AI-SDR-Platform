@@ -20,6 +20,7 @@ import { createSmsRouter, createSmsWebhookRouter } from './modules/sms/sms.route
 import { createTransferRulesRouter } from './modules/transfer-rules/transfer-rules.router';
 import { createSettingsRouter } from './modules/settings/settings.router';
 import { createDncRouter } from './modules/dnc/dnc.router';
+import { createSequencesRouter } from './modules/sequences/sequences.router';
 import { createImportsRouter } from './modules/imports/imports.router';
 import { createAuditRouter } from './modules/audit/audit.router';
 import { createDocsRouter } from './modules/docs/docs.router';
@@ -110,6 +111,7 @@ export function createApp(): Application {
   app.use('/api/v1/transfer-rules', createTransferRulesRouter(routerCtx));
   app.use('/api/v1/settings', createSettingsRouter(routerCtx));
   app.use('/api/v1/dnc', createDncRouter(routerCtx));
+  app.use('/api/v1/sequences', createSequencesRouter(routerCtx));
   app.use('/api/v1/imports', createImportsRouter(routerCtx));
   app.use('/api/v1/audit', createAuditRouter(routerCtx));
   app.use('/api/v1/crm', createCrmRouter(routerCtx));
