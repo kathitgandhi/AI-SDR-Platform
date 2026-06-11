@@ -9,6 +9,46 @@ interface RouterContext {
   logger: Logger;
 }
 
+// These mirror the Postgres enums (retail_vertical, persona_name, campaign_status)
+// in 001_initial_schema.sql. target_verticals/enabled_personas are enum[] columns,
+// so a value that isn't an exact enum member makes Postgres reject the whole insert
+// with an opaque 500. We normalize friendly labels ("Grocery", "Wholesale
+// Distribution") to the enum value and return a clear 400 on anything invalid.
+const VALID_VERTICALS = [
+  'grocery', 'general_retail', 'wholesale_distribution', 'automotive_retail',
+  'electronics', 'specialty', 'cpg_operator', 'pharmacy', 'convenience',
+  'home_improvement', 'fashion_apparel', 'furniture', 'unknown',
+];
+const VALID_PERSONAS = ['mike', 'sarah', 'david', 'rachel', 'chris', 'emma', 'daniel'];
+const VALID_STATUSES = ['draft', 'active', 'paused', 'completed', 'archived'];
+
+/** Lowercase + collapse spaces/hyphens to underscores so "Wholesale Distribution"
+ *  and "wholesale-distribution" both map to the enum value "wholesale_distribution". */
+function toEnumValue(raw: unknown): string {
+  return String(raw).trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+/** Normalize an incoming enum array against the allowed set. Returns undefined for
+ *  null/undefined (so the DB column default is preserved); throws ValidationError
+ *  (→ 400) listing valid values when any entry is unrecognized. */
+function normalizeEnumArray(
+  value: unknown,
+  valid: string[],
+  field: string,
+): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new ValidationError(`${field} must be an array`);
+  return value.map((raw) => {
+    const norm = toEnumValue(raw);
+    if (!valid.includes(norm)) {
+      throw new ValidationError(
+        `Invalid ${field} value "${raw}". Valid values: ${valid.join(', ')}`,
+      );
+    }
+    return norm;
+  });
+}
+
 export function createCampaignsRouter({ supabase, logger }: RouterContext): Router {
   const router = Router();
 
@@ -79,17 +119,25 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
       } = req.body;
       if (!name) throw new ValidationError('name is required');
 
+      const normalizedVerticals = normalizeEnumArray(target_verticals, VALID_VERTICALS, 'target_verticals');
+      const normalizedPersonas = normalizeEnumArray(enabled_personas, VALID_PERSONAS, 'enabled_personas');
+      const normalizedStatus = status === undefined || status === null ? 'draft' : toEnumValue(status);
+      if (!VALID_STATUSES.includes(normalizedStatus)) {
+        throw new ValidationError(`Invalid status "${status}". Valid values: ${VALID_STATUSES.join(', ')}`);
+      }
+
       const insert: Record<string, unknown> = {
         name,
         description,
-        target_verticals,
         target_titles,
         daily_call_limit: daily_call_limit ?? 100,
         hourly_call_limit: hourly_call_limit ?? 20,
         max_concurrent_calls: max_concurrent_calls ?? 5,
-        enabled_personas,
-        status: status ?? 'draft',
+        status: normalizedStatus,
       };
+      // Only set enum-array columns when provided, so the DB defaults are preserved.
+      if (normalizedVerticals !== undefined) insert.target_verticals = normalizedVerticals;
+      if (normalizedPersonas !== undefined) insert.enabled_personas = normalizedPersonas;
       if (userId) insert.created_by = userId;
 
       const { data, error } = await supabase
