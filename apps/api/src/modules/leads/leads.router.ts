@@ -6,6 +6,7 @@ import { getUserId, getReadScopeUserId } from '../../shared/user-scope';
 import { enqueueCrmSync } from '../../shared/crm-sync-queue';
 import { enqueueCall } from '../../shared/call-queue';
 import { enqueuePhoneLookup } from '../../shared/phone-lookup-queue';
+import { enqueueEmailEnrollment } from '../../shared/email-sequence-queue';
 import { audit } from '../../shared/audit';
 import { PERSONAS } from '@ai-sdr/core';
 
@@ -226,6 +227,17 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
       if (phone && runPhoneLookup) {
         phoneLookupJobId = await enqueuePhoneLookup({ contactId, leadId: newLead.id, phone });
       }
+      // Email-only leads are never called, so the post-call enrollment path can't
+      // reach them — start a first-touch email sequence immediately on creation.
+      // (Leads that go to phone_lookup_pending and later resolve to email_only are
+      // enrolled by the phone-lookup worker instead.)
+      let emailEnrollmentQueued = false;
+      if (newLead.stage === 'email_only') {
+        await enqueueEmailEnrollment({
+          leadId: newLead.id, contactId, campaignId, sequenceName: 'cold_followup',
+        });
+        emailEnrollmentQueued = true;
+      }
       enqueueCrmSync('lead', newLead.id, 'create');
 
       audit(supabase, logger, req, {
@@ -235,10 +247,11 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
         changes: { source, stage: newLead.stage, company: companyName, campaign_id: campaignId },
       });
 
-      logger.info({ leadId: newLead.id, stage: newLead.stage, phoneLookupJobId }, 'Manual lead created');
+      logger.info({ leadId: newLead.id, stage: newLead.stage, phoneLookupJobId, emailEnrollmentQueued }, 'Manual lead created');
       res.status(201).json({
         lead: { id: newLead.id, stage: newLead.stage, contact_id: contactId, company_id: companyId },
         phone_lookup_queued: !!phoneLookupJobId,
+        email_enrollment_queued: emailEnrollmentQueued,
       });
     } catch (err) {
       next(err);

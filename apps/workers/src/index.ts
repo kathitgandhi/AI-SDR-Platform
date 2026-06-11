@@ -163,6 +163,7 @@ async function bootstrap(): Promise<void> {
       supabase,
       lookupClient,
       dncChecker,
+      emailSequenceQueue: queues[QUEUE_NAMES.EMAIL_SEQUENCE],
       connection: redis,
       logger,
       config: { strict: workerEnv.PHONE_LOOKUP_STRICT === 'true' },
