@@ -34,6 +34,16 @@ async function bootstrap(): Promise<void> {
   const dncChecker = new DncChecker(workerEnv.SUPABASE_URL, workerEnv.SUPABASE_SERVICE_ROLE_KEY, logger);
   const timezoneGuard = new TimezoneGuard(workerEnv.CALL_WINDOW_START_HOUR, workerEnv.CALL_WINDOW_END_HOUR);
 
+  // Gmail OAuth health check: the refresh-token flow needs the client secret too.
+  // The per-worker gate only checks client_id + refresh_token, so a missing
+  // secret would pass startup but fail at send time with invalid_client. Warn loudly.
+  if (workerEnv.GMAIL_CLIENT_ID && workerEnv.GMAIL_REFRESH_TOKEN && !workerEnv.GMAIL_CLIENT_SECRET) {
+    logger.warn('GMAIL_CLIENT_ID/REFRESH_TOKEN set but GMAIL_CLIENT_SECRET is empty — Gmail token refresh will fail at send time. Set GMAIL_CLIENT_SECRET.');
+  }
+  if (workerEnv.GMAIL_FROM_ADDRESS === 'sales@example.com') {
+    logger.warn('GMAIL_FROM_ADDRESS is still the default placeholder (sales@example.com) — set it to the authenticated Gmail account or a verified send-as alias.');
+  }
+
   if (workerTypes.includes('call-executor')) {
     const elevenLabsClient = new ElevenLabsAgentClient(workerEnv.ELEVENLABS_API_KEY, workerEnv.ELEVENLABS_BASE_URL, logger);
 
@@ -186,7 +196,23 @@ async function bootstrap(): Promise<void> {
         digestRecipient: workerEnv.GMAIL_CC_HOT_LEADS ?? workerEnv.GMAIL_FROM_ADDRESS ?? null,
       },
     }));
-    logger.info('Reporting worker started');
+
+    // Register repeatable jobs so digests + MV refresh run on a schedule without
+    // an external cron. Repeatable jobs are de-duplicated by their repeat key,
+    // so re-adding on every boot is safe.
+    const reportingQueue = queues[QUEUE_NAMES.REPORTING];
+    await reportingQueue.add('daily-digest', { type: 'daily_digest' },
+      { repeat: { pattern: workerEnv.REPORTING_DAILY_DIGEST_CRON } });
+    await reportingQueue.add('weekly-digest', { type: 'weekly_digest' },
+      { repeat: { pattern: workerEnv.REPORTING_WEEKLY_DIGEST_CRON } });
+    await reportingQueue.add('mv-refresh', { type: 'mv_refresh' },
+      { repeat: { pattern: workerEnv.REPORTING_MV_REFRESH_CRON } });
+
+    logger.info({
+      daily: workerEnv.REPORTING_DAILY_DIGEST_CRON,
+      weekly: workerEnv.REPORTING_WEEKLY_DIGEST_CRON,
+      mvRefresh: workerEnv.REPORTING_MV_REFRESH_CRON,
+    }, 'Reporting worker started + cron jobs registered');
   }
 
   if (workerTypes.includes('scheduler')) {
