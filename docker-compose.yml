@@ -69,5 +69,24 @@ services:
     volumes:
       - redis-data:/data
 
+  # Reverse proxy + automatic HTTPS (Let's Encrypt). Routes the public nip.io
+  # hosts to the api/mcp containers. Config lives in ./Caddyfile.
+  caddy:
+    image: caddy:2-alpine
+    container_name: ai-sdr-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - mcp
+
 volumes:
   redis-data:
+  caddy_data:
+  caddy_config:

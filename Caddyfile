@@ -1,0 +1,13 @@
+# Caddy reverse proxy for the AI SDR platform (auto-HTTPS via Let's Encrypt).
+# Mounted into the caddy service at /etc/caddy/Caddyfile.
+#
+# Hosts are nip.io wildcards pointing at the EC2 public IP. If the IP changes,
+# update both blocks (and DNS/EIP) accordingly.
+
+34-199-206-157.nip.io {
+    reverse_proxy api:3000
+}
+
+mcp.34-199-206-157.nip.io {
+    reverse_proxy mcp:3001
+}
