@@ -12,6 +12,7 @@ import { createCrmSyncWorker } from './workers/crm-sync.worker';
 import { createLeadImportWorker } from './workers/lead-import.worker';
 import { createEmailSequenceWorker } from './workers/email-sequence.worker';
 import { createPhoneLookupWorker } from './workers/phone-lookup.worker';
+import { createReportingWorker } from './workers/reporting.worker';
 import { createPipelineScheduler } from './workers/pipeline-scheduler';
 import { ElevenLabsAgentClient, ClaudeReasoningService, GmailClient, ZoomInfoClient, TwilioLookupClient } from '@ai-sdr/integrations';
 import { DncChecker, TimezoneGuard, CallOutcomeScorer } from '@ai-sdr/core';
@@ -168,6 +169,24 @@ async function bootstrap(): Promise<void> {
       config: { strict: workerEnv.PHONE_LOOKUP_STRICT === 'true' },
     }));
     logger.info({ strict: workerEnv.PHONE_LOOKUP_STRICT === 'true' }, 'Phone-lookup worker started');
+  }
+
+  if (workerTypes.includes('reporting')) {
+    const gmailClient = (workerEnv.GMAIL_CLIENT_ID && workerEnv.GMAIL_REFRESH_TOKEN)
+      ? new GmailClient(workerEnv.GMAIL_CLIENT_ID, workerEnv.GMAIL_CLIENT_SECRET, workerEnv.GMAIL_REFRESH_TOKEN, logger)
+      : null;
+    workers.push(createReportingWorker({
+      supabase,
+      gmailClient,
+      connection: redis,
+      logger,
+      config: {
+        fromAddress: workerEnv.GMAIL_FROM_ADDRESS,
+        fromName: workerEnv.GMAIL_FROM_NAME,
+        digestRecipient: workerEnv.GMAIL_CC_HOT_LEADS ?? workerEnv.GMAIL_FROM_ADDRESS ?? null,
+      },
+    }));
+    logger.info('Reporting worker started');
   }
 
   if (workerTypes.includes('scheduler')) {
