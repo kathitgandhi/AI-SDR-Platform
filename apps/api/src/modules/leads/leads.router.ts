@@ -45,6 +45,7 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
           companies(id, name, retail_vertical, store_count, website)
         `)
         .in('stage', ['qualified', 'meeting_booked', 'connected'])
+        .is('deleted_at', null)
         .order('score', { ascending: false })
         .limit(25);
       if (userId) query = query.eq('created_by', userId);
@@ -85,6 +86,7 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
           companies(id, name, retail_vertical, store_count)
         `, { count: 'exact' });
 
+      query = query.is('deleted_at', null);
       if (userId) query = query.eq('created_by', userId);
       if (stage) query = query.eq('stage', stage);
       if (score_min) query = query.gte('score', parseInt(score_min));
@@ -265,7 +267,8 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
       let query = supabase
         .from('leads')
         .select(`*, contacts(*), companies(*)`)
-        .eq('id', req.params.id);
+        .eq('id', req.params.id)
+        .is('deleted_at', null);
       if (userId) query = query.eq('created_by', userId);
       const { data: lead, error } = await query.single();
 
@@ -499,6 +502,94 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
 
       logger.info({ leadId: req.params.id }, 'Lead added to DNC');
       res.json({ success: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // PATCH /api/v1/leads/:id — edit lead + (optionally) its contact / company.
+  // Accepts lead fields at the top level, and nested `contact` / `company`
+  // objects (contact fields are also accepted flat for convenience).
+  router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = getUserId(req);
+      const b = req.body as Record<string, unknown>;
+
+      let leadQ = supabase.from('leads').select('id, contact_id, company_id').eq('id', req.params.id).is('deleted_at', null);
+      if (userId) leadQ = leadQ.eq('created_by', userId);
+      const { data: lead, error: leadErr } = await leadQ.single();
+      if (leadErr || !lead) throw new NotFoundError('Lead', req.params.id);
+
+      const now = new Date().toISOString();
+
+      // Lead fields
+      const leadUpdates: Record<string, unknown> = {};
+      if (b['stage'] !== undefined) leadUpdates['stage'] = b['stage'];
+      if (b['score'] !== undefined) leadUpdates['score'] = Number(b['score']);
+      if (b['priority'] !== undefined) leadUpdates['priority'] = Number(b['priority']);
+      if (b['campaign_id'] !== undefined) leadUpdates['campaign_id'] = b['campaign_id'];
+      if (b['next_contact_at'] !== undefined) leadUpdates['next_contact_at'] = b['next_contact_at'];
+      if (b['assigned_persona'] !== undefined) leadUpdates['assigned_persona'] = requireValidPersona(b['assigned_persona']);
+      if (Object.keys(leadUpdates).length > 0) {
+        leadUpdates['updated_at'] = now;
+        const { error } = await supabase.from('leads').update(leadUpdates).eq('id', lead.id);
+        if (error) throw error;
+      }
+
+      // Contact fields (nested `contact` object, or flat top-level)
+      const c = (b['contact'] as Record<string, unknown> | undefined) ?? b;
+      const contactUpdates: Record<string, unknown> = {};
+      for (const k of ['first_name', 'last_name', 'email', 'title']) {
+        if (c[k] !== undefined) contactUpdates[k] = c[k];
+      }
+      if (c['phone_direct'] !== undefined || c['phone'] !== undefined) {
+        contactUpdates['phone_direct'] = c['phone_direct'] ?? c['phone'];
+      }
+      if (Object.keys(contactUpdates).length > 0) {
+        contactUpdates['updated_at'] = now;
+        const { error } = await supabase.from('contacts').update(contactUpdates).eq('id', lead.contact_id);
+        if (error) throw error;
+      }
+
+      // Company fields (nested `company` object)
+      const co = (b['company'] as Record<string, unknown> | undefined) ?? {};
+      const companyUpdates: Record<string, unknown> = {};
+      for (const k of ['name', 'website', 'headquarters_state']) {
+        if (co[k] !== undefined) companyUpdates[k] = co[k];
+      }
+      if (co['retail_vertical'] !== undefined) {
+        companyUpdates['retail_vertical'] = String(co['retail_vertical']).trim().toLowerCase().replace(/[\s-]+/g, '_');
+      }
+      if (co['store_count'] !== undefined) companyUpdates['store_count'] = Number(co['store_count']);
+      if (Object.keys(companyUpdates).length > 0) {
+        companyUpdates['updated_at'] = now;
+        const { error } = await supabase.from('companies').update(companyUpdates).eq('id', lead.company_id);
+        if (error) throw error;
+      }
+
+      const { data: updated } = await supabase
+        .from('leads').select('*, contacts(*), companies(*)').eq('id', lead.id).single();
+      logger.info({ leadId: lead.id }, 'Lead updated');
+      res.json({ lead: updated });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // DELETE /api/v1/leads/:id — soft delete (reversible; hard delete is blocked
+  // by RESTRICT FKs on emails/appointments/transcripts and would destroy history).
+  router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const userId = getUserId(req);
+      const now = new Date().toISOString();
+      let q = supabase.from('leads')
+        .update({ deleted_at: now, updated_at: now })
+        .eq('id', req.params.id).is('deleted_at', null);
+      if (userId) q = q.eq('created_by', userId);
+      const { data, error } = await q.select('id').single();
+      if (error || !data) throw new NotFoundError('Lead', req.params.id);
+      logger.info({ leadId: req.params.id }, 'Lead soft-deleted');
+      res.json({ success: true, id: req.params.id });
     } catch (err) {
       next(err);
     }
