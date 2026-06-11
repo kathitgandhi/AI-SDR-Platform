@@ -46,6 +46,13 @@ const workerEnvSchema = z.object({
   ELEVENLABS_COST_PER_MINUTE_USD: z.coerce.number().default(0.10),
   TWILIO_VOICE_COST_PER_MINUTE_USD: z.coerce.number().default(0.014),
 
+  // --- Reporting cron (only used when WORKER_TYPES includes 'reporting') ---
+  // Cron patterns for the repeatable digest + materialized-view-refresh jobs the
+  // reporting worker registers. Times are in the server's timezone.
+  REPORTING_DAILY_DIGEST_CRON: z.string().default('0 23 * * *'),   // 11pm daily
+  REPORTING_WEEKLY_DIGEST_CRON: z.string().default('0 23 * * 0'),  // 11pm Sunday
+  REPORTING_MV_REFRESH_CRON: z.string().default('0 * * * *'),      // hourly
+
   // --- Pipeline scheduler (auto-dial + auto-import) ---
   // How often the autonomous engine scans active campaigns to dial leads / top
   // up the lead pool. Only used when WORKER_TYPES includes 'scheduler'.
