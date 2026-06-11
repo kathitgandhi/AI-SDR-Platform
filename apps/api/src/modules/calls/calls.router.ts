@@ -21,14 +21,16 @@ export function createCallsRouter({ supabase, logger }: RouterContext): Router {
       let query = supabase
         .from('appointments')
         .select(`
-          id, status, scheduled_at, duration_minutes, timezone, meeting_type,
+          id, status, scheduled_at, time_confirmed, duration_minutes, timezone, meeting_type,
           meeting_link, assigned_rep_name, assigned_rep_email,
           qualification_summary, key_pain_points, products_of_interest,
           store_count, budget_indication, decision_timeline, created_at,
           contacts(id, first_name, last_name, title, email),
           companies(id, name, retail_vertical, store_count)
         `, { count: 'exact' })
-        .order('scheduled_at', { ascending: false });
+        // Most recently created first; "time TBD" (null scheduled_at) rows sort
+        // naturally instead of jumping to the top.
+        .order('created_at', { ascending: false });
 
       if (userId) query = query.eq('created_by', userId);
       if (status) query = query.eq('status', status);
