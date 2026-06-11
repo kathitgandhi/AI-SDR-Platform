@@ -5,6 +5,7 @@ import { ValidationError } from '../../shared/errors';
 import { getUserId } from '../../shared/user-scope';
 import { audit } from '../../shared/audit';
 import { enqueueCrmSync } from '../../shared/crm-sync-queue';
+import { enqueueEnrichment } from '../../shared/enrichment-queue';
 
 interface RouterContext {
   supabase: SupabaseClient;
@@ -205,6 +206,11 @@ export function createImportsRouter({ supabase, logger }: RouterContext): Router
 
           // Auto-sync to CRM (fire-and-forget)
           enqueueCrmSync('lead', newLead.id, 'create');
+
+          // Advance the lead out of `new`: the enrichment worker normalizes it
+          // and routes to phone-lookup (callable/email_only) or email-only
+          // enrollment. Without this, CSV-imported leads stall at `new`.
+          await enqueueEnrichment({ companyId, leadId: newLead.id, domain: '' });
 
           imported++;
         } catch (e) {
