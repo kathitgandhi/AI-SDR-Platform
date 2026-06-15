@@ -70,7 +70,34 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
 
       const { data, error } = await query;
       if (error) throw error;
-      res.json({ campaigns: data ?? [] });
+
+      // The total_leads/calls_made/meetings_booked columns are denormalized and
+      // were never maintained, so they always read 0. Compute the counts live
+      // from the source tables instead.
+      const campaigns = data ?? [];
+      const ids = campaigns.map((c) => c.id);
+      if (ids.length > 0) {
+        const [leadRows, callRows, apptRows] = await Promise.all([
+          supabase.from('leads').select('campaign_id').in('campaign_id', ids).is('deleted_at', null),
+          supabase.from('calls').select('campaign_id').in('campaign_id', ids),
+          supabase.from('appointments').select('campaign_id').in('campaign_id', ids),
+        ]);
+        const tally = (rows: Array<{ campaign_id: string | null }> | null) => {
+          const m: Record<string, number> = {};
+          for (const r of rows ?? []) if (r.campaign_id) m[r.campaign_id] = (m[r.campaign_id] ?? 0) + 1;
+          return m;
+        };
+        const leadsByC = tally(leadRows.data);
+        const callsByC = tally(callRows.data);
+        const apptsByC = tally(apptRows.data);
+        for (const c of campaigns) {
+          (c as Record<string, unknown>)['total_leads'] = leadsByC[c.id] ?? 0;
+          (c as Record<string, unknown>)['calls_made'] = callsByC[c.id] ?? 0;
+          (c as Record<string, unknown>)['meetings_booked'] = apptsByC[c.id] ?? 0;
+        }
+      }
+
+      res.json({ campaigns });
     } catch (err) {
       next(err);
     }
@@ -102,6 +129,15 @@ export function createCampaignsRouter({ supabase, logger }: RouterContext): Rout
         .eq('campaign_id', req.params.id)
         .order('created_at', { ascending: false })
         .limit(10);
+
+      // Live counts (the denormalized columns are never maintained).
+      const [{ count: callsMade }, { count: meetingsBooked }] = await Promise.all([
+        supabase.from('calls').select('id', { count: 'exact', head: true }).eq('campaign_id', req.params.id),
+        supabase.from('appointments').select('id', { count: 'exact', head: true }).eq('campaign_id', req.params.id),
+      ]);
+      (campaign as Record<string, unknown>)['total_leads'] = (stageData ?? []).length;
+      (campaign as Record<string, unknown>)['calls_made'] = callsMade ?? 0;
+      (campaign as Record<string, unknown>)['meetings_booked'] = meetingsBooked ?? 0;
 
       res.json({ campaign, stageCounts, recentCalls: recentCalls ?? [] });
     } catch (err) {
