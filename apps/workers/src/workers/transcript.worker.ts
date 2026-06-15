@@ -238,9 +238,10 @@ export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
       // sees the meeting and can adjust it.
       if (outcome === 'meeting_booked') {
         const mtg = analysisResult?.callAnalysis?.meeting_details;
-        const defaultScheduledAt = new Date();
-        defaultScheduledAt.setDate(defaultScheduledAt.getDate() + 2);
-        const scheduledAt = mtg?.confirmed_date ?? mtg?.proposed_date ?? defaultScheduledAt.toISOString();
+        // Only store a real time when the prospect committed to one:
+        //  confirmed_date → confirmed; proposed_date → tentative; neither → TBD (null).
+        const scheduledAt = mtg?.confirmed_date ?? mtg?.proposed_date ?? null;
+        const timeConfirmed = !!mtg?.confirmed_date;
 
         // Defensive idempotency: don't create a second appointment for this call.
         const { data: existingAppt } = await deps.supabase
@@ -248,7 +249,7 @@ export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
         if (!existingAppt) {
           await deps.supabase.from('appointments').insert({
             lead_id: leadId, contact_id: call.contact_id, company_id: call.company_id, call_id: callId,
-            campaign_id: call.campaign_id, scheduled_at: scheduledAt,
+            campaign_id: call.campaign_id, scheduled_at: scheduledAt, time_confirmed: timeConfirmed,
             duration_minutes: mtg?.duration_minutes ?? 30, timezone: mtg?.timezone ?? 'America/New_York',
             qualification_summary: handoffSummary, key_pain_points: qualData?.pain_points ?? [],
             store_count: qualData?.store_count ?? null, budget_indication: qualData?.budget_range ?? null,
