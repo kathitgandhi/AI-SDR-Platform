@@ -177,6 +177,9 @@ export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
 
         deps.supabase.from('leads').update({
           stage: scoredOutcome.newLeadStage, call_attempts: call.attempt_number ?? 1,
+          // Propagate the call's qualification score back to the lead. Keep the
+          // best score seen so a later no-answer (qual 0) doesn't wipe a good one.
+          score: Math.max(Number((lead as { score?: number }).score ?? 0), scoredOutcome.qualificationScore ?? 0),
           last_called_at: now, next_contact_at: scoredOutcome.nextContactAt?.toISOString() ?? null,
           last_call_summary: analysisResult?.callAnalysis?.summary ?? null,
           handoff_summary: handoffSummary,
