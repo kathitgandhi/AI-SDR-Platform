@@ -43,6 +43,9 @@ const DIALABLE_STAGES = ['callable', 'called_no_answer', 'called_voicemail'] as 
 const PENDING_STAGES = ['new', 'enriching', 'enriched', 'phone_lookup_pending', 'callable'] as const;
 /** call.status values that mean a call is currently occupying a concurrency slot. */
 const IN_FLIGHT_CALL_STATUSES = ['dialing', 'ringing', 'answered'] as const;
+/** A lead sitting in 'in_call_queue' longer than this (no call-execute job ran)
+ *  is considered a lost claim and reset back to 'callable'. */
+const STUCK_CLAIM_MS = 15 * 60 * 1000;
 
 interface CampaignRow {
   id: string;
@@ -208,10 +211,36 @@ export function createPipelineScheduler(deps: PipelineSchedulerDeps): { close: (
     return dialed;
   }
 
+  /**
+   * Recover leads stranded in 'in_call_queue'. The scheduler atomically flips a
+   * lead to 'in_call_queue' and enqueues a call-execute job; the call-executor
+   * then advances it to 'calling'. If that job is lost (e.g. Redis eviction) or
+   * the worker dies before processing, the lead is stuck — 'in_call_queue' is
+   * NOT a dialable stage, so it would never be re-picked. Reset any such lead
+   * older than the threshold back to 'callable' so it gets dialed again.
+   */
+  async function recoverStuckClaims(): Promise<void> {
+    const cutoff = new Date(Date.now() - STUCK_CLAIM_MS).toISOString();
+    const { data, error } = await supabase
+      .from('leads')
+      .update({ stage: 'callable', next_contact_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('stage', 'in_call_queue')
+      .lt('updated_at', cutoff)
+      .select('id');
+    if (error) {
+      log.error({ err: error.message }, 'Stuck-claim recovery query failed');
+      return;
+    }
+    if (data && data.length > 0) {
+      log.warn({ count: data.length }, 'Recovered leads stuck in in_call_queue → callable');
+    }
+  }
+
   async function autoDialTick(): Promise<void> {
     if (dialing) return;
     dialing = true;
     try {
+      await recoverStuckClaims();
       const campaigns = await getActiveCampaigns();
       let total = 0;
       for (const c of campaigns) total += await dialCampaign(c);
