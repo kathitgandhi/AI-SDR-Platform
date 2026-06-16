@@ -428,8 +428,20 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
         safe['assigned_persona'] = requireValidPersona(safe['assigned_persona']);
       }
 
+      // Reassigning a lead to a campaign re-enters it into the pipeline as if new:
+      // reset to callable + clear attempts so it gets dialed fresh for that
+      // campaign (unless the caller explicitly set a stage in this update).
+      const reassigning = updates['campaign_id'] !== undefined && updates['stage'] === undefined;
+      if (reassigning) {
+        safe['stage'] = 'callable';
+        safe['call_attempts'] = 0;
+        safe['next_contact_at'] = new Date().toISOString();
+      }
+
       let q = supabase.from('leads').update(safe).in('id', lead_ids);
       if (userId) q = q.eq('created_by', userId);
+      // Never revive opted-out / dead leads when bulk-reassigning.
+      if (reassigning) q = q.not('stage', 'in', '(dnc,dead)');
       const { data, error } = await q.select('id, stage');
       if (error) throw error;
 
@@ -515,7 +527,7 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
       const userId = getUserId(req);
       const b = req.body as Record<string, unknown>;
 
-      let leadQ = supabase.from('leads').select('id, contact_id, company_id').eq('id', req.params.id).is('deleted_at', null);
+      let leadQ = supabase.from('leads').select('id, contact_id, company_id, campaign_id, stage').eq('id', req.params.id).is('deleted_at', null);
       if (userId) leadQ = leadQ.eq('created_by', userId);
       const { data: lead, error: leadErr } = await leadQ.single();
       if (leadErr || !lead) throw new NotFoundError('Lead', req.params.id);
@@ -530,6 +542,18 @@ export function createLeadsRouter({ supabase, logger }: RouterContext): Router {
       if (b['campaign_id'] !== undefined) leadUpdates['campaign_id'] = b['campaign_id'];
       if (b['next_contact_at'] !== undefined) leadUpdates['next_contact_at'] = b['next_contact_at'];
       if (b['assigned_persona'] !== undefined) leadUpdates['assigned_persona'] = requireValidPersona(b['assigned_persona']);
+
+      // Moving a lead to a DIFFERENT campaign re-enters it as new: reset to
+      // callable + clear attempts so it's dialed fresh (unless the caller set a
+      // stage explicitly, or the lead is opted-out/dead).
+      const currentCampaign = (lead as { campaign_id: string | null }).campaign_id ?? null;
+      const currentStage = (lead as { stage: string }).stage;
+      const changingCampaign = b['campaign_id'] !== undefined && b['campaign_id'] !== currentCampaign;
+      if (changingCampaign && b['stage'] === undefined && !['dnc', 'dead'].includes(currentStage)) {
+        leadUpdates['stage'] = 'callable';
+        leadUpdates['call_attempts'] = 0;
+        leadUpdates['next_contact_at'] = now;
+      }
       if (Object.keys(leadUpdates).length > 0) {
         leadUpdates['updated_at'] = now;
         const { error } = await supabase.from('leads').update(leadUpdates).eq('id', lead.id);
