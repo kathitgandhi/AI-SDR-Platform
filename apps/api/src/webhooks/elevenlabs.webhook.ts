@@ -151,11 +151,30 @@ export function createElevenLabsWebhookRouter(deps: {
     }
 
     try {
-      const { data: call } = await supabase
+      let { data: call } = await supabase
         .from('calls')
         .select('id, lead_id, status')
         .eq('elevenlabs_session_id', conversationId)
         .maybeSingle();
+
+      // No call row for this conversation. For OUTBOUND the call-executor always
+      // pre-creates the row, so a missing row means this is almost certainly an
+      // INBOUND call where the conversation-init webhook wasn't received (or
+      // isn't configured). Recover by creating the inbound call from the
+      // post-call payload, so inbound works even if only THIS webhook is wired.
+      if (!call) {
+        const phone = (body.data?.metadata?.phone_call ?? {}) as Record<string, string>;
+        const fromPhone = phone['external_number'] ?? body.data?.metadata?.caller_id ?? body.caller_id ?? 'unknown';
+        const toPhone = phone['agent_number'] ?? body.data?.metadata?.called_number ?? 'unknown';
+        const direction = phone['direction'] ?? 'inbound';
+        if (direction !== 'outbound') {
+          logger.info({ conversationId, fromPhone }, 'post-call: no row — recovering as inbound');
+          await handleInboundInitiated(supabase, logger, { fromPhone, toPhone, conversationId });
+          const { data: created } = await supabase
+            .from('calls').select('id, lead_id, status').eq('elevenlabs_session_id', conversationId).maybeSingle();
+          call = created ?? null;
+        }
+      }
 
       if (!call || !call.lead_id) {
         logger.warn({ conversationId }, 'post-call: no matching call row — relying on fallback');
