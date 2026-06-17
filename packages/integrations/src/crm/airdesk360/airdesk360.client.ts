@@ -290,21 +290,42 @@ export class AirDesk360Adapter implements ICrmAdapter {
     await this.put(`/api/leads/${dealId}`, { description: `Stage updated to: ${stage}` });
   }
 
-  /** No /notes endpoint — model as a Task with description. */
+  /**
+   * Post a note visible in the Notes tab of the lead/customer.
+   *
+   * AirDesk360 (Perfex CRM) exposes POST /api/notes with rel_type + rel_id +
+   * description. This is what populates the Notes tab on any entity.
+   * Falls back to /api/tasks (which appears in the Tasks tab) if the notes
+   * endpoint returns a non-success response, so the data is never silently lost.
+   */
   async addNote(note: CrmNote): Promise<void> {
     const relTypeMap: Record<CrmNote['entityType'], 'customer' | 'lead' | 'project'> = {
-      contact: 'customer', // contacts are nested under customer; attach to that
+      contact: 'customer',
       company: 'customer',
-      deal: 'lead',
+      deal:    'lead',
     };
-    const body: Record<string, unknown> = {
-      name: note.body.slice(0, 100),
+    const relType = relTypeMap[note.entityType];
+    const dateContacted = new Date(note.timestamp ?? Date.now()).toISOString().slice(0, 10);
+
+    // Primary: POST /api/notes — shows in the Notes tab
+    const notesBody: Record<string, unknown> = {
+      rel_type:      relType,
+      rel_id:        note.entityId,
+      description:   note.body,
+      datecontacted: dateContacted,
+    };
+    const notesRes = await this.post<MutationResponse>(`/api/notes`, notesBody);
+    if (notesRes.data?.status) return; // success — note is in the Notes tab
+
+    // Fallback: POST /api/tasks — shows in the Tasks tab (data never lost)
+    const tasksBody: Record<string, unknown> = {
+      name:        `📞 Call Transcript — ${dateContacted}`,
       description: note.body,
-      rel_type: relTypeMap[note.entityType],
-      rel_id: note.entityId,
-      startdate: new Date(note.timestamp ?? Date.now()).toISOString().slice(0, 10),
+      rel_type:    relType,
+      rel_id:      note.entityId,
+      startdate:   dateContacted,
     };
-    await this.post(`/api/tasks`, body);
+    await this.post(`/api/tasks`, tasksBody);
   }
 
   /** Calendar event surrogate for meetings */
