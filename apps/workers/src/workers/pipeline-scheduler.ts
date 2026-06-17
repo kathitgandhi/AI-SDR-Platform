@@ -37,8 +37,12 @@ interface PipelineSchedulerDeps {
   config: PipelineSchedulerConfig;
 }
 
-/** lead stages eligible to be (re)dialed. */
-const DIALABLE_STAGES = ['callable', 'called_no_answer', 'called_voicemail'] as const;
+/** lead stages eligible to be (re)dialed. Includes called_gatekeeper so leads
+ *  that hit a gatekeeper / non-decision-maker get re-attempted (respecting
+ *  call_attempts < retry max and their next_contact_at delay). */
+const DIALABLE_STAGES = ['callable', 'called_no_answer', 'called_voicemail', 'called_gatekeeper'] as const;
+/** Nurture stages whose next_contact_at is re-checked for re-engagement. */
+const NURTURE_STAGES = ['nurturing_30d', 'nurturing_90d', 'nurturing_180d'] as const;
 /** stages that count as "lead still in the funnel" for the import-buffer check. */
 const PENDING_STAGES = ['new', 'enriching', 'enriched', 'phone_lookup_pending', 'callable'] as const;
 /** call.status values that mean a call is currently occupying a concurrency slot. */
@@ -236,11 +240,37 @@ export function createPipelineScheduler(deps: PipelineSchedulerDeps): { close: (
     }
   }
 
+  /**
+   * Re-engage nurtured leads. When a lead is parked in a nurturing_* stage with
+   * a future next_contact_at (e.g. not_interested → 180d, using_competitor →
+   * 90d), nothing brings it back into the dial pool once that date passes. This
+   * resets due nurtures (next_contact_at <= now) to 'callable' so they're worked
+   * again. DNC/dead are never touched (different stages).
+   */
+  async function reactivateDueNurtures(): Promise<void> {
+    const nowIso = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('leads')
+      .update({ stage: 'callable', call_attempts: 0, next_contact_at: nowIso, updated_at: nowIso })
+      .in('stage', NURTURE_STAGES as unknown as string[])
+      .not('next_contact_at', 'is', null)
+      .lte('next_contact_at', nowIso)
+      .select('id');
+    if (error) {
+      log.error({ err: error.message }, 'Nurture reactivation query failed');
+      return;
+    }
+    if (data && data.length > 0) {
+      log.info({ count: data.length }, 'Reactivated due nurtured leads → callable');
+    }
+  }
+
   async function autoDialTick(): Promise<void> {
     if (dialing) return;
     dialing = true;
     try {
       await recoverStuckClaims();
+      await reactivateDueNurtures();
       const campaigns = await getActiveCampaigns();
       let total = 0;
       for (const c of campaigns) total += await dialCampaign(c);
