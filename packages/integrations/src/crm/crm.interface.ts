@@ -61,17 +61,21 @@ export class NullCrmAdapter implements ICrmAdapter {
 }
 
 export function createCrmAdapter(provider: string, config: Record<string, string>): ICrmAdapter {
+  // Only hubspot + airdesk360 are implemented. salesforce/pipedrive/zoho are
+  // valid env enum values but have no client module — require()-ing them would
+  // throw "Cannot find module" and crash the worker. No-op with a clear warning
+  // instead of crashing.
   switch (provider) {
     case 'hubspot':
       return new (require('./hubspot/hubspot.client').HubSpotAdapter)(config);
-    case 'salesforce':
-      return new (require('./salesforce/salesforce.client').SalesforceAdapter)(config);
-    case 'pipedrive':
-      return new (require('./pipedrive/pipedrive.client').PipedriveAdapter)(config);
-    case 'zoho':
-      return new (require('./zoho/zoho.client').ZohoAdapter)(config);
     case 'airdesk360':
       return new (require('./airdesk360/airdesk360.client').AirDesk360Adapter)(config);
+    case 'salesforce':
+    case 'pipedrive':
+    case 'zoho':
+      // eslint-disable-next-line no-console
+      console.warn(`[crm] provider "${provider}" is not implemented — CRM sync will no-op. Use hubspot or airdesk360.`);
+      return new NullCrmAdapter();
     default:
       return new NullCrmAdapter();
   }
