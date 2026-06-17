@@ -93,6 +93,10 @@ const workerEnvSchema = z.object({
   CRM_PROVIDER: z.enum(['hubspot', 'salesforce', 'pipedrive', 'zoho', 'airdesk360', 'none']).default('none'),
   AIRDESK360_BASE_URL: z.string().optional(),
   AIRDESK360_API_KEY: z.string().optional(),
+  // Default owner/department new AirDesk records are attached to (defaults to '1'
+  // in the client). Set these so synced leads/deals land under the right user/dept.
+  AIRDESK360_DEFAULT_USER_ID: z.string().optional(),
+  AIRDESK360_DEFAULT_DEPARTMENT_ID: z.string().optional(),
   HUBSPOT_ACCESS_TOKEN: z.string().optional(),
   SALESFORCE_CLIENT_ID: z.string().optional(),
   SALESFORCE_CLIENT_SECRET: z.string().optional(),

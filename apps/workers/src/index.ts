@@ -146,6 +146,8 @@ async function bootstrap(): Promise<void> {
         provider: workerEnv.CRM_PROVIDER,
         airdeskBaseUrl: workerEnv.AIRDESK360_BASE_URL,
         airdeskApiKey: workerEnv.AIRDESK360_API_KEY,
+        airdeskDefaultUserId: workerEnv.AIRDESK360_DEFAULT_USER_ID,
+        airdeskDefaultDepartmentId: workerEnv.AIRDESK360_DEFAULT_DEPARTMENT_ID,
       },
     }));
     logger.info({ provider: workerEnv.CRM_PROVIDER }, 'CRM sync worker started');
