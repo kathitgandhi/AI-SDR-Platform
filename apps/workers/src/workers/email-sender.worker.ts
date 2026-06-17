@@ -99,6 +99,27 @@ export function createEmailSenderWorker(deps: EmailSenderDeps): Worker {
       if (!subject || !bodyText) {
         jobLogger.info('Generating email via Claude');
         const sequenceType = (providedSequenceType ?? TEMPLATE_TO_SEQUENCE[template ?? 'follow_up'] ?? 'cold_followup') as EmailSequenceType;
+
+        // For a meeting-confirmation email, pull the booked appointment so the
+        // email includes the actual date/time and the Google Meet join link.
+        let meetingDate: string | undefined;
+        let meetingLink: string | undefined;
+        if (sequenceType === 'meeting_confirmation') {
+          const { data: appt } = await supabase
+            .from('appointments')
+            .select('scheduled_at, meeting_link, timezone, time_confirmed')
+            .eq('lead_id', leadId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (appt?.scheduled_at && appt.time_confirmed) {
+            meetingDate = new Date(appt.scheduled_at).toLocaleString('en-US', {
+              dateStyle: 'full', timeStyle: 'short', timeZone: appt.timezone ?? 'America/New_York',
+            }) + (appt.timezone ? ` (${appt.timezone})` : '');
+          }
+          if (appt?.meeting_link) meetingLink = appt.meeting_link;
+        }
+
         const generated = await claudeService.generateEmail({
           sequenceType,
           stepNumber: providedStepNumber ?? 1,
@@ -112,6 +133,8 @@ export function createEmailSenderWorker(deps: EmailSenderDeps): Worker {
           storeCount: (lead as any).store_count_confirmed ?? company.store_count ?? undefined,
           painPoints: (lead as any).pain_points ?? undefined,
           callSummary: (lead as any).last_call_summary ?? undefined,
+          ...(meetingDate ? { meetingDate } : {}),
+          ...(meetingLink ? { meetingLink } : {}),
         });
         subject = subject ?? generated.subject;
         bodyText = bodyText ?? generated.bodyText;
