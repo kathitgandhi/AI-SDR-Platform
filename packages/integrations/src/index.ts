@@ -9,5 +9,6 @@ export * from './elevenlabs/elevenlabs-agent.client';
 export * from './elevenlabs/elevenlabs-webhook';
 export * from './anthropic/reasoning.service';
 export * from './gmail/gmail.client';
+export * from './google-calendar/google-calendar.client';
 export * from './crm/crm.interface';
 export * from './crm/airdesk360/airdesk360.client';
