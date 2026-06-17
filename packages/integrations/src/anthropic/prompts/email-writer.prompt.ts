@@ -21,6 +21,8 @@ export interface EmailWriterContext {
   productsOfInterest?: string[];
   callSummary?: string;
   meetingDate?: string;
+  /** Google Meet join URL — included verbatim in meeting-confirmation emails. */
+  meetingLink?: string;
   demoNotes?: string;
   lastContactDate?: string;
   vertical?: string;
@@ -62,7 +64,8 @@ ${ctx.vertical ? `- Retail vertical: ${ctx.vertical}` : ''}
 ${ctx.painPoints?.length ? `- Known pain points: ${ctx.painPoints.join(', ')}` : ''}
 ${ctx.productsOfInterest?.length ? `- Products of interest: ${ctx.productsOfInterest.join(', ')}` : ''}
 ${ctx.callSummary ? `- Previous call notes: ${ctx.callSummary}` : ''}
-${ctx.meetingDate ? `- Meeting date: ${ctx.meetingDate}` : ''}
+${ctx.meetingDate ? `- Meeting date/time: ${ctx.meetingDate}` : ''}
+${ctx.meetingLink ? `- Google Meet link (include this EXACT URL in the email as the join link): ${ctx.meetingLink}` : ''}
 ${ctx.demoNotes ? `- Demo notes: ${ctx.demoNotes}` : ''}
 ${ctx.lastContactDate ? `- Last contacted: ${ctx.lastContactDate}` : ''}
 
