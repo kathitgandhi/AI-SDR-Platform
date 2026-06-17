@@ -14,7 +14,7 @@ import { createEmailSequenceWorker } from './workers/email-sequence.worker';
 import { createPhoneLookupWorker } from './workers/phone-lookup.worker';
 import { createReportingWorker } from './workers/reporting.worker';
 import { createPipelineScheduler } from './workers/pipeline-scheduler';
-import { ElevenLabsAgentClient, ClaudeReasoningService, GmailClient, ZoomInfoClient, TwilioLookupClient } from '@ai-sdr/integrations';
+import { ElevenLabsAgentClient, ClaudeReasoningService, GmailClient, ZoomInfoClient, TwilioLookupClient, GoogleCalendarClient } from '@ai-sdr/integrations';
 import { DncChecker, TimezoneGuard, CallOutcomeScorer } from '@ai-sdr/core';
 import { elevenLabsAgentIds } from './config/env';
 
@@ -66,6 +66,16 @@ async function bootstrap(): Promise<void> {
     const elevenLabsClient = new ElevenLabsAgentClient(workerEnv.ELEVENLABS_API_KEY, workerEnv.ELEVENLABS_BASE_URL, logger);
     const claudeService = new ClaudeReasoningService(workerEnv.ANTHROPIC_API_KEY, workerEnv.ANTHROPIC_MODEL, workerEnv.ANTHROPIC_MAX_TOKENS, logger);
 
+    // Calendar/Meet invites: only when explicitly enabled AND Gmail OAuth is
+    // configured (the refresh token must also carry the calendar.events scope).
+    const calendarClient =
+      workerEnv.CALENDAR_INVITES_ENABLED === 'true' && workerEnv.GMAIL_CLIENT_ID && workerEnv.GMAIL_REFRESH_TOKEN
+        ? new GoogleCalendarClient(workerEnv.GMAIL_CLIENT_ID, workerEnv.GMAIL_CLIENT_SECRET, workerEnv.GMAIL_REFRESH_TOKEN, logger)
+        : null;
+    if (workerEnv.CALENDAR_INVITES_ENABLED === 'true' && !calendarClient) {
+      logger.warn('CALENDAR_INVITES_ENABLED=true but Gmail OAuth is not configured — calendar invites disabled');
+    }
+
     workers.push(createTranscriptWorker({
       supabase, elevenLabsClient, claudeService,
       outcomeScorer: new CallOutcomeScorer(),
@@ -77,8 +87,10 @@ async function bootstrap(): Promise<void> {
         elevenLabsPerMinuteUsd: workerEnv.ELEVENLABS_COST_PER_MINUTE_USD,
         twilioPerMinuteUsd: workerEnv.TWILIO_VOICE_COST_PER_MINUTE_USD,
       },
+      calendarClient,
+      calendarConfig: { companyName: workerEnv.COMPANY_NAME, ccEmail: workerEnv.GMAIL_CC_HOT_LEADS ?? null },
     }));
-    logger.info('Transcript worker started');
+    logger.info({ calendarInvites: !!calendarClient }, 'Transcript worker started');
   }
 
   if (workerTypes.includes('email-sender')) {

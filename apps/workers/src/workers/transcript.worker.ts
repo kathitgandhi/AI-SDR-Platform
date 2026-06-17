@@ -4,6 +4,7 @@ import { Logger } from 'pino';
 import { TranscriptProcessJobPayload, QUEUE_NAMES } from '../queues/queue.registry';
 import { ElevenLabsAgentClient } from '@ai-sdr/integrations';
 import { ClaudeReasoningService } from '@ai-sdr/integrations';
+import type { GoogleCalendarClient } from '@ai-sdr/integrations';
 import { CallOutcomeScorer, DncChecker } from '@ai-sdr/core';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { CallOutcome } from '@ai-sdr/database';
@@ -23,6 +24,10 @@ interface TranscriptWorkerDeps {
   /** Per-minute voice cost rates (USD), used to record per-call telephony +
    *  voice-agent spend into api_usage. Sourced from worker env. */
   costRates: { elevenLabsPerMinuteUsd: number; twilioPerMinuteUsd: number };
+  /** Optional — when set (CALENDAR_INVITES_ENABLED + Gmail/calendar scope), a
+   *  confirmed booking gets a Google Calendar event + Meet link + emailed invite. */
+  calendarClient: GoogleCalendarClient | null;
+  calendarConfig: { companyName: string; ccEmail: string | null };
 }
 
 export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
@@ -243,18 +248,46 @@ export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
         const scheduledAt = mtg?.confirmed_date ?? mtg?.proposed_date ?? null;
         const timeConfirmed = !!mtg?.confirmed_date;
 
+        const durationMinutes = mtg?.duration_minutes ?? 30;
+        const timezone = mtg?.timezone ?? 'America/New_York';
+
         // Defensive idempotency: don't create a second appointment for this call.
         const { data: existingAppt } = await deps.supabase
           .from('appointments').select('id').eq('call_id', callId).maybeSingle();
         if (!existingAppt) {
-          await deps.supabase.from('appointments').insert({
+          const { data: appt } = await deps.supabase.from('appointments').insert({
             lead_id: leadId, contact_id: call.contact_id, company_id: call.company_id, call_id: callId,
             campaign_id: call.campaign_id, scheduled_at: scheduledAt, time_confirmed: timeConfirmed,
-            duration_minutes: mtg?.duration_minutes ?? 30, timezone: mtg?.timezone ?? 'America/New_York',
+            duration_minutes: durationMinutes, timezone,
             qualification_summary: handoffSummary, key_pain_points: qualData?.pain_points ?? [],
             store_count: qualData?.store_count ?? null, budget_indication: qualData?.budget_range ?? null,
             decision_timeline: qualData?.rollout_timeline ?? null,
-          });
+          }).select('id').single();
+
+          // Calendar invite + Google Meet link — only when a concrete time was
+          // confirmed and we have the prospect's email. Best-effort: never let a
+          // calendar failure break call processing.
+          const prospectEmail = String(contact['email'] ?? (mtg as any)?.attendee_email ?? '').trim();
+          if (deps.calendarClient && appt && timeConfirmed && scheduledAt && prospectEmail) {
+            try {
+              const attendees = [prospectEmail, deps.calendarConfig.ccEmail].filter(Boolean) as string[];
+              const meeting = await deps.calendarClient.createMeeting({
+                summary: `${deps.calendarConfig.companyName} — intro demo with ${String(company['name'] ?? 'your team')}`,
+                description: handoffSummary ?? analysisResult?.callAnalysis?.summary ?? 'Product demo.',
+                startIso: scheduledAt,
+                durationMinutes,
+                timezone,
+                attendees,
+                requestId: callId,
+              });
+              await deps.supabase.from('appointments').update({
+                meeting_link: meeting.meetLink, calendar_event_id: meeting.eventId,
+              }).eq('id', appt.id);
+              workerLogger.info({ apptId: appt.id, meetLink: meeting.meetLink }, 'Calendar invite + Meet link created');
+            } catch (err) {
+              workerLogger.warn({ err }, 'Calendar invite creation failed (appointment still booked)');
+            }
+          }
         }
       }
 

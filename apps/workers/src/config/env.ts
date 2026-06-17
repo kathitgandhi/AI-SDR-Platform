@@ -46,6 +46,13 @@ const workerEnvSchema = z.object({
   ELEVENLABS_COST_PER_MINUTE_USD: z.coerce.number().default(0.10),
   TWILIO_VOICE_COST_PER_MINUTE_USD: z.coerce.number().default(0.014),
 
+  // --- Google Calendar / Meet invites for booked meetings ---
+  // When true (and Gmail OAuth is configured WITH the calendar.events scope), a
+  // confirmed meeting booking creates a Google Calendar event + Meet link and
+  // emails the invite to the prospect. Requires the refresh token to include
+  // https://www.googleapis.com/auth/calendar.events.
+  CALENDAR_INVITES_ENABLED: z.enum(['true', 'false']).default('false'),
+
   // --- Reporting cron (only used when WORKER_TYPES includes 'reporting') ---
   // Cron patterns for the repeatable digest + materialized-view-refresh jobs the
   // reporting worker registers. Times are in the server's timezone.
