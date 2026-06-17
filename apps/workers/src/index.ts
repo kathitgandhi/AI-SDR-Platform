@@ -12,6 +12,7 @@ import { createCrmSyncWorker } from './workers/crm-sync.worker';
 import { createLeadImportWorker } from './workers/lead-import.worker';
 import { createEmailSequenceWorker } from './workers/email-sequence.worker';
 import { createPhoneLookupWorker } from './workers/phone-lookup.worker';
+import { createEnrichmentWorker } from './workers/enrichment.worker';
 import { createReportingWorker } from './workers/reporting.worker';
 import { createPipelineScheduler } from './workers/pipeline-scheduler';
 import { ElevenLabsAgentClient, ClaudeReasoningService, GmailClient, ZoomInfoClient, TwilioLookupClient } from '@ai-sdr/integrations';
@@ -180,6 +181,17 @@ async function bootstrap(): Promise<void> {
       config: { strict: workerEnv.PHONE_LOOKUP_STRICT === 'true' },
     }));
     logger.info({ strict: workerEnv.PHONE_LOOKUP_STRICT === 'true' }, 'Phone-lookup worker started');
+  }
+
+  if (workerTypes.includes('enrichment')) {
+    workers.push(createEnrichmentWorker({
+      supabase,
+      phoneLookupQueue: queues[QUEUE_NAMES.PHONE_LOOKUP],
+      emailSequenceQueue: queues[QUEUE_NAMES.EMAIL_SEQUENCE],
+      connection: redis,
+      logger,
+    }));
+    logger.info('Enrichment worker started');
   }
 
   if (workerTypes.includes('reporting')) {
