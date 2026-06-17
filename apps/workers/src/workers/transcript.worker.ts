@@ -299,7 +299,20 @@ export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
         });
       }
 
-      await deps.crmSyncQueue.add('sync-lead', { entity: 'lead', entityId: leadId, action: 'update', provider: process.env['CRM_PROVIDER'] ?? 'none' });
+      // Push the lead update + the full call transcript to AirDesk360 (or whichever
+      // CRM is configured). Both jobs are independent — the call-sync worker will
+      // run syncLead() inline if the lead hasn't been synced yet, so ordering
+      // between these two jobs does not matter.
+      await Promise.all([
+        deps.crmSyncQueue.add('sync-lead', {
+          entity: 'lead', entityId: leadId, action: 'update',
+          provider: process.env['CRM_PROVIDER'] ?? 'none',
+        }),
+        deps.crmSyncQueue.add('sync-call', {
+          entity: 'call', entityId: callId, action: 'create',
+          provider: process.env['CRM_PROVIDER'] ?? 'none',
+        }),
+      ]);
 
       workerLogger.info({ outcome, outcomeScore: scoredOutcome.outcomeScore }, 'Transcript processing complete');
       return { outcome, scores: scoredOutcome };
