@@ -195,6 +195,17 @@ export function createSmsWebhookRouter(deps: { supabase: SupabaseClient; logger:
         const toNumber = payload.To;
         const body = payload.Body ?? '';
 
+        // Idempotency: Twilio retries webhooks, so skip if this MessageSid is
+        // already recorded (provider id is stored in the telnyx_message_id column).
+        if (messageSid) {
+          const { data: existingMsg } = await supabase
+            .from('sms_messages').select('id').eq('telnyx_message_id', messageSid).maybeSingle();
+          if (existingMsg) {
+            logger.info({ messageSid }, 'Inbound SMS already recorded — skipping duplicate');
+            return;
+          }
+        }
+
         // Look up contact by phone
         const { data: matchedContact } = await supabase
           .from('contacts')

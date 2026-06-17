@@ -162,9 +162,13 @@ export class CallOutcomeScorer {
         break;
 
       default:
+        // Unknown/unmapped outcome — keep the lead in the pipeline rather than
+        // nulling its stage. Treat like a no-answer so it stays dialable + gets
+        // a follow-up, instead of leaving newLeadStage undefined.
         outcomeScore = 5;
         nextAction = 'send_followup_email';
         sequenceToTrigger = 'no_answer_email';
+        newLeadStage = 'called_no_answer';
     }
 
     return {

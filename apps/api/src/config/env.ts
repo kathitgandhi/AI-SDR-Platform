@@ -52,13 +52,16 @@ const envSchema = z.object({
   ANTHROPIC_MAX_TOKENS: z.coerce.number().default(4096),
   ANTHROPIC_REASONING_BUDGET: z.coerce.number().default(2048),
 
-  // Gmail
-  GMAIL_CLIENT_ID: z.string().min(1),
-  GMAIL_CLIENT_SECRET: z.string().min(1),
-  GMAIL_REFRESH_TOKEN: z.string().min(1),
-  GMAIL_FROM_ADDRESS: z.string().email(),
-  GMAIL_FROM_NAME: z.string().min(1),
-  GMAIL_CC_HOT_LEADS: z.string().email(),
+  // Gmail — used by the WORKERS to send email. The API never constructs a
+  // GmailClient (it only enqueues sends + reads process.env directly to surface a
+  // "not configured" hint), so these are optional here. Requiring them would
+  // block API startup even though the API doesn't use them.
+  GMAIL_CLIENT_ID: z.string().optional(),
+  GMAIL_CLIENT_SECRET: z.string().optional(),
+  GMAIL_REFRESH_TOKEN: z.string().optional(),
+  GMAIL_FROM_ADDRESS: z.string().optional(),
+  GMAIL_FROM_NAME: z.string().optional(),
+  GMAIL_CC_HOT_LEADS: z.string().optional(),
 
   // CRM
   CRM_PROVIDER: z.enum(['hubspot', 'salesforce', 'pipedrive', 'zoho', 'airdesk360', 'none']).default('none'),
