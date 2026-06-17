@@ -3,6 +3,7 @@ import { Redis } from 'ioredis';
 import { Logger } from 'pino';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { GmailClient, ClaudeReasoningService, EmailSequenceType } from '@ai-sdr/integrations';
+import { DncChecker } from '@ai-sdr/core';
 
 export interface EmailSendJobPayload {
   leadId: string;
@@ -23,6 +24,8 @@ interface EmailSenderDeps {
   supabase: SupabaseClient;
   gmailClient: GmailClient;
   claudeService: ClaudeReasoningService;
+  /** Compliance gate — never email an address on the do-not-contact list. */
+  dncChecker: DncChecker;
   connection: Redis;
   logger: Logger;
   config: {
@@ -51,7 +54,7 @@ const TEMPLATE_TO_SEQUENCE: Record<string, string> = {
  * 4. Records the email in the `emails` table
  */
 export function createEmailSenderWorker(deps: EmailSenderDeps): Worker {
-  const { supabase, gmailClient, claudeService, connection, logger, config } = deps;
+  const { supabase, gmailClient, claudeService, dncChecker, connection, logger, config } = deps;
   const workerLogger = logger.child({ worker: 'email-sender' });
 
   return new Worker<EmailSendJobPayload>(
@@ -64,7 +67,7 @@ export function createEmailSenderWorker(deps: EmailSenderDeps): Worker {
       // 1. Load lead + contact + company
       const { data: lead, error: leadErr } = await supabase
         .from('leads')
-        .select('id, contact_id, company_id, campaign_id, store_count_confirmed, pain_points, rollout_timeline, budget_range, last_call_summary, contacts(*), companies(*)')
+        .select('id, contact_id, company_id, campaign_id, stage, store_count_confirmed, pain_points, rollout_timeline, budget_range, last_call_summary, contacts(*), companies(*)')
         .eq('id', leadId)
         .single();
       if (leadErr || !lead) throw new Error(`Lead ${leadId} not found: ${leadErr?.message ?? 'unknown'}`);
@@ -73,6 +76,19 @@ export function createEmailSenderWorker(deps: EmailSenderDeps): Worker {
       const company = (lead as any).companies ?? {};
       if (!contact.email) {
         throw new Error(`Contact has no email address — cannot send (lead=${leadId})`);
+      }
+
+      // Compliance gate: never email an address on the DNC list, and never email
+      // a lead that's been marked DNC. This is the authoritative outbound-email
+      // chokepoint (covers both sequence sends and one-off sends).
+      if ((lead as any).stage === 'dnc') {
+        jobLogger.info('Lead is DNC — skipping email');
+        return { skipped: true, reason: 'lead_dnc' };
+      }
+      const emailDnc = await dncChecker.checkEmail(String(contact.email));
+      if (emailDnc.isOnDnc) {
+        jobLogger.info({ reason: emailDnc.reason }, 'Email on DNC — skipping');
+        return { skipped: true, reason: 'email_dnc' };
       }
 
       // 2. Generate subject/body if missing

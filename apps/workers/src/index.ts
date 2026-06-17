@@ -98,6 +98,7 @@ async function bootstrap(): Promise<void> {
         supabase,
         gmailClient,
         claudeService,
+        dncChecker,
         connection: redis,
         logger,
         config: {
