@@ -236,21 +236,21 @@ async function syncCall(
   // 4. Format the note body
   const noteBody = formatCallNote(call, transcript);
 
-  // 5. Post as a note on the AirDesk360 deal
-  let noteId = '';
+  // 5. Post as a note on the AirDesk360 deal.
+  // addNote() returns void per the ICrmAdapter interface.
   try {
-    noteId = await adapter.addNote({
+    await adapter.addNote({
       entityId: crmLeadId,
       entityType: 'deal',
       body: noteBody,
       timestamp: call.created_at,
     });
-    logger.info({ callId, crmLeadId, noteId }, 'Call transcript posted to AirDesk360');
+    logger.info({ callId, crmLeadId }, 'Call transcript posted to AirDesk360');
   } catch (e) {
     logger.warn({ err: (e as Error).message, callId, crmLeadId }, 'Failed to post call note to AirDesk360');
   }
 
-  return { note_id: noteId, crm_lead_id: crmLeadId };
+  return { note_id: 'posted', crm_lead_id: crmLeadId };
 }
 
 /** Build a human-readable note body from call + transcript data. */
