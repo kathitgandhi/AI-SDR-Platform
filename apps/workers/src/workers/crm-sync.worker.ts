@@ -193,7 +193,7 @@ async function syncCall(
   ] = await Promise.all([
     supabase
       .from('calls')
-      .select('id, lead_id, contact_id, company_id, campaign_id, outcome, duration_seconds, persona_id, call_summary, next_steps, created_at, to_number')
+      .select('id, lead_id, contact_id, company_id, campaign_id, outcome, duration_seconds, call_summary, next_steps, created_at, to_number')
       .eq('id', callId)
       .single(),
     supabase
@@ -265,11 +265,10 @@ function formatCallNote(call: any, transcript: any): string {
     ? formatDuration(call.duration_seconds)
     : 'Unknown';
   const outcome = (call.outcome ?? 'unknown').replace(/_/g, ' ');
-  const persona = call.persona_id ?? 'AI Agent';
 
   lines.push(`📞 Call Transcript — ${callDate}`);
   lines.push('');
-  lines.push(`Agent: ${persona} | Duration: ${durationStr} | Outcome: ${outcome}`);
+  lines.push(`Duration: ${durationStr} | Outcome: ${outcome}`);
   lines.push('');
 
   // Summary

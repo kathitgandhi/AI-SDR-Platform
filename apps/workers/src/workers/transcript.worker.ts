@@ -216,6 +216,44 @@ export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
         workerLogger.warn({ err }, 'Email capture from transcript failed');
       }
 
+      // Resolve inbound caller identity: if the contact is still a placeholder
+      // ("Unknown Caller") and Claude extracted a name from the transcript, update
+      // the contact row so the lead list shows a real name going forward.
+      try {
+        const callerName    = (analysisResult?.callAnalysis as any)?.caller_name   as string | null | undefined;
+        const callerCompany = (analysisResult?.callAnalysis as any)?.caller_company as string | null | undefined;
+        const callerTitle   = (analysisResult?.callAnalysis as any)?.caller_title   as string | null | undefined;
+
+        const isUnknownContact =
+          !contact['first_name'] ||
+          String(contact['first_name']).toLowerCase().startsWith('unknown');
+
+        if (callerName && isUnknownContact) {
+          const parts     = callerName.trim().split(/\s+/);
+          const firstName = parts[0] ?? callerName.trim();
+          const lastName  = parts.slice(1).join(' ') || null;
+          await deps.supabase.from('contacts').update({
+            first_name: firstName,
+            ...(lastName      ? { last_name: lastName }     : {}),
+            ...(callerTitle   ? { title: callerTitle }      : {}),
+            updated_at: now,
+          }).eq('id', call.contact_id);
+          workerLogger.info({ contactId: call.contact_id, callerName }, 'Updated inbound caller name from transcript');
+        }
+
+        // Update company name if still a phone-number placeholder
+        const isUnknownCompany = String(company['name'] ?? '').toLowerCase().startsWith('unknown caller');
+        if (callerCompany && isUnknownCompany && call.company_id) {
+          await deps.supabase.from('companies').update({
+            name: callerCompany,
+            updated_at: now,
+          }).eq('id', call.company_id);
+          workerLogger.info({ companyId: call.company_id, callerCompany }, 'Updated inbound caller company from transcript');
+        }
+      } catch (err) {
+        workerLogger.warn({ err }, 'Inbound caller identity update failed');
+      }
+
       // Auto-note: persist Claude summary + next_steps as a transcript-sourced note
       try {
         if (analysisResult?.callAnalysis?.summary || analysisResult?.callAnalysis?.next_steps) {

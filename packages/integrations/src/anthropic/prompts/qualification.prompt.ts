@@ -70,7 +70,10 @@ Extract ALL qualification data from the transcript and return a JSON object with
     "dnc_requested": <true/false>,
     "opt_out_requested": <true/false>,
     "decision_maker_reached": <true/false>,
-    "gatekeeper_reached": <true/false>
+    "gatekeeper_reached": <true/false>,
+    "caller_name": "<full name if the caller introduced themselves during the call, null if never stated>",
+    "caller_company": "<company name if the caller mentioned their company, null if never stated>",
+    "caller_title": "<job title/role if the caller mentioned it, null if never stated>"
   },
   "crm_notes": "<Professional CRM-ready notes that a human sales rep would want to read before a follow-up call. Include all relevant context, pain points, tech stack, and next steps.>"
 }
