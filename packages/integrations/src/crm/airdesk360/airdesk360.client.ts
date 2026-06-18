@@ -28,6 +28,24 @@ interface MutationResponse {
   id?: string | number;
 }
 
+export interface AirDeskEstimateItem {
+  description: string;
+  longDescription?: string;
+  qty: number;
+  rate: number;
+  unit?: string;
+}
+
+export interface AirDeskEstimateParams {
+  customerId: string | number;
+  contactId?: string | number;
+  title: string;                    // used as the estimate subject/note
+  items: AirDeskEstimateItem[];
+  dueDate?: string;                 // YYYY-MM-DD; defaults to 30 days out
+  notes?: string;                   // admin-facing note
+  terms?: string;
+}
+
 export interface AirDeskTicketParams {
   subject: string;
   description?: string;
@@ -348,6 +366,58 @@ export class AirDesk360Adapter implements ICrmAdapter {
       throw new Error(`AirDesk360 createCalendar failed: ${res.data?.message ?? res.status}`);
     }
     return this.extractId(res.data);
+  }
+
+  /**
+   * Create an estimate (quote) in AirDesk360 for a prospect.
+   * Falls back to a detailed Task if the /api/estimates endpoint returns 404
+   * (AirDesk360 tenants may not have the module enabled).
+   */
+  async createEstimate(params: AirDeskEstimateParams): Promise<string> {
+    const today    = new Date().toISOString().slice(0, 10);
+    const dueDate  = params.dueDate ?? new Date(Date.now() + 30 * 86400_000).toISOString().slice(0, 10);
+
+    // Build flat form body with Perfex-style newitems[] array notation
+    const body: Record<string, unknown> = {
+      clientid:  params.customerId,
+      date:      today,
+      duedate:   dueDate,
+      currency:  1,
+      adminnote: params.notes ?? params.title,
+      terms:     params.terms ?? 'Pricing is indicative. A specialist will confirm during the discovery call.',
+    };
+
+    // Perfex CRM estimate line items use newitems[N][field] notation
+    params.items.forEach((item, i) => {
+      body[`newitems[${i}][description]`]      = item.description;
+      body[`newitems[${i}][long_description]`] = item.longDescription ?? '';
+      body[`newitems[${i}][qty]`]              = item.qty;
+      body[`newitems[${i}][rate]`]             = item.rate;
+      body[`newitems[${i}][unit]`]             = item.unit ?? 'pcs';
+      body[`newitems[${i}][order]`]            = i;
+    });
+
+    const res = await this.post<MutationResponse>(`/api/estimates`, body);
+
+    // If estimates module is enabled and the call succeeded
+    if (res.status !== 404 && res.data?.status) {
+      return this.extractId(res.data);
+    }
+
+    // Fallback: create a Task with the estimate details so nothing is lost
+    const itemLines = params.items
+      .map(it => `• ${it.description} — qty ${it.qty}`)
+      .join('\n');
+    const fallbackBody = {
+      name:        `💰 Estimate Request — ${params.title}`,
+      description: `${params.notes ?? ''}\n\nItems:\n${itemLines}\n\nDue: ${dueDate}`,
+      rel_type:    'customer',
+      rel_id:      params.customerId,
+      startdate:   today,
+      duedate:     dueDate,
+    };
+    const fallback = await this.post(`/api/tasks`, fallbackBody);
+    return fallback.data?.status ? 'task-fallback' : '';
   }
 
   /** Create a support ticket. Beyond ICrmAdapter — call directly. */

@@ -36,9 +36,16 @@ Approved opening: "Hi ${ctx.contactFirstName}, this is AI ${ctx.persona.charAt(0
 
 ## YOUR PRODUCTS
 
-1. **AirESL** — Electronic shelf label system. Replaces paper labels with digital, real-time price displays across all store shelves. Eliminates labor for price changes, reduces pricing errors, integrates with POS and ERP.
-   - Key benefits: 60-90% reduction in price-change labor, zero pricing errors, real-time sync with promotions
-   - Best fit: 10+ store locations, high SKU count, frequent price changes
+1. **AirESL** — Full graphic E-Ink electronic shelf label system connecting every product, shelf, and price to the cloud in real time.
+   - **SLIM Series sizes**: 1.54″ up to 13.3″ — all models IP65 rated with 5+ year replaceable battery
+   - **Display tech**: E-Ink (Black/White/Red/Yellow), 175° viewing angle, crisp in any lighting
+   - **Connectivity**: 2.4GHz SDR wireless; AirLED ceiling-mounted APs (each gateway supports 8 APs for full-store coverage)
+   - **Interactive**: NFC tap + QR code at shelf edge so shoppers can access product detail, reviews, and purchase options
+   - **Staff tools**: Pick-to-light LED indicators (Red/Blue/Green) for fulfilment; planogram compliance alerts
+   - **Templates**: 661 pre-built store templates (grocery, specialty, promotions, WIC, barcodes)
+   - **Key metrics**: Reduce price-change labour by 80%+, near-zero pricing errors, real-time POS/ERP sync
+   - **Certifications**: RoHS, CE, FCC, IC
+   - **Best fit**: 5+ locations, high SKU count, frequent price changes, paper labels today
 
 2. **AirPOS** — Modern point of sale platform. Cloud-based, omnichannel, supports self-checkout, integrates with loyalty programs, real-time inventory.
    - Key benefits: Faster checkout, unified online/offline inventory, open APIs for integration
