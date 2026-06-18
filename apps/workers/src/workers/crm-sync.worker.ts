@@ -193,7 +193,7 @@ async function syncCall(
   ] = await Promise.all([
     supabase
       .from('calls')
-      .select('id, lead_id, contact_id, company_id, campaign_id, outcome, duration_seconds, call_summary, next_steps, created_at, to_number')
+      .select('id, lead_id, contact_id, company_id, campaign_id, outcome, duration_seconds, call_summary, next_steps, created_at, to_number, direction, persona')
       .eq('id', callId)
       .single(),
     supabase
@@ -237,7 +237,6 @@ async function syncCall(
   const noteBody = formatCallNote(call, transcript);
 
   // 5. Post as a note on the AirDesk360 deal.
-  // addNote() returns void per the ICrmAdapter interface.
   try {
     await adapter.addNote({
       entityId: crmLeadId,
@@ -248,6 +247,71 @@ async function syncCall(
     logger.info({ callId, crmLeadId }, 'Call transcript posted to AirDesk360');
   } catch (e) {
     logger.warn({ err: (e as Error).message, callId, crmLeadId }, 'Failed to post call note to AirDesk360');
+  }
+
+  // 6. Inbound-specific actions: estimate for ESL inquiries, ticket for support
+  const isInbound: boolean = (call as any).direction === 'inbound' || (call as any).persona === 'receptionist';
+  if (isInbound) {
+    const callAnalysis      = (transcript?.claude_analysis as any) ?? {};
+    const inboundCallType   = (callAnalysis.inbound_call_type ?? '') as string;
+    const crmCustomerId     = (lead as any).crm_company_id ?? '';
+    const contact           = (lead as any).contacts  ?? {};
+    const company           = (lead as any).companies ?? {};
+
+    // ESL inquiry → create estimate so the lead arrives in AirDesk with a quote stub
+    if (inboundCallType === 'esl_inquiry' && crmCustomerId) {
+      try {
+        const qual    = (transcript?.qualification_data ?? {}) as any;
+        const labels  = Number(qual.esl_label_count ?? 0);
+        const stores  = Number(qual.store_count     ?? 1);
+        await adapter.createEstimate({
+          customerId: crmCustomerId,
+          title: `ESL Inquiry — ${company.name ?? 'Prospect'}`,
+          items: [
+            {
+              description:     'AirESL SLIM Series Electronic Shelf Labels',
+              longDescription: 'Full graphic E-Ink, real-time cloud sync. IP65 rated, 5+ year battery. Sizes 1.54″–13.3″. Includes NFC + QR, pick-to-light LED.',
+              qty:  labels || Math.max(stores * 50, 50),
+              rate: 0,
+              unit: 'pcs',
+            },
+            {
+              description:     'AirLED Ceiling Access Point + Gateway',
+              longDescription: 'Base station + gateway. Each gateway supports up to 8 APs for full-store coverage.',
+              qty:  stores || 1,
+              rate: 0,
+              unit: 'unit',
+            },
+          ],
+          notes: `Inbound ESL inquiry from ${contact.first_name ?? 'caller'}. ` +
+                 `Pricing TBD — specialist to confirm during discovery call.`,
+          terms: 'Indicative quote only. A specialist will confirm pricing and configuration.',
+        });
+        logger.info({ callId, crmCustomerId }, 'AirDesk360 estimate created for ESL inquiry');
+      } catch (e) {
+        logger.warn({ err: (e as Error).message, callId }, 'Failed to create AirDesk360 estimate');
+      }
+    }
+
+    // Support request → open a ticket
+    if (inboundCallType === 'support_request') {
+      const crmContactId = (lead as any).crm_contact_id ?? '';
+      if (crmContactId) {
+        try {
+          const summary = callAnalysis.summary ?? 'Inbound support call — see transcript.';
+          await adapter.createTicket({
+            subject:     `Support — ${company.name ?? 'Customer'} (inbound ${new Date(call.created_at).toLocaleDateString()})`,
+            description: summary + '\n\n' + noteBody.slice(0, 1500),
+            priority:    'medium',
+            contactId:   crmContactId,
+            customerId:  crmCustomerId || undefined,
+          });
+          logger.info({ callId, crmContactId }, 'AirDesk360 support ticket created for inbound call');
+        } catch (e) {
+          logger.warn({ err: (e as Error).message, callId }, 'Failed to create AirDesk360 ticket');
+        }
+      }
+    }
   }
 
   return { note_id: 'posted', crm_lead_id: crmLeadId };

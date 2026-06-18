@@ -337,6 +337,35 @@ export function createTranscriptWorker(deps: TranscriptWorkerDeps): Worker {
         });
       }
 
+      // Inbound call email follow-up: if an inbound caller provided their email,
+      // enroll them in the appropriate sequence immediately.
+      const isInboundCall = call.direction === 'inbound' || call.persona === 'receptionist';
+      if (isInboundCall && contact['email']) {
+        const inboundCallType: string =
+          (analysisResult?.callAnalysis as any)?.inbound_call_type ?? 'other';
+
+        const sequenceMap: Record<string, string> = {
+          esl_inquiry:     'inbound_esl_inquiry',
+          support_request: 'inbound_support_ack',
+          partnership:     'inbound_partnership',
+        };
+        const inboundSequence = sequenceMap[inboundCallType];
+        if (inboundSequence) {
+          try {
+            await enrollContactInSequence(deps.supabase, deps.emailSequenceQueue, {
+              leadId,
+              contactId:    call.contact_id,
+              campaignId:   call.campaign_id,
+              sequenceName: inboundSequence,
+              triggerCallId: callId,
+            });
+            workerLogger.info({ inboundCallType, inboundSequence }, 'Inbound caller enrolled in email sequence');
+          } catch (err) {
+            workerLogger.warn({ err }, 'Inbound email sequence enrollment failed');
+          }
+        }
+      }
+
       // Push the lead update + the full call transcript to AirDesk360 (or whichever
       // CRM is configured). Both jobs are independent — the call-sync worker will
       // run syncLead() inline if the lead hasn't been synced yet, so ordering

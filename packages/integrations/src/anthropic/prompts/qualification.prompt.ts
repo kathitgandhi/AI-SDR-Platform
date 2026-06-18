@@ -27,6 +27,7 @@ Extract ALL qualification data from the transcript and return a JSON object with
 {
   "qualification_data": {
     "store_count": <number or null>,
+    "esl_label_count": <number or null — total ESL units requested or mentioned>,
     "current_esl_vendor": "<string or null>",
     "current_pos_vendor": "<string or null>",
     "current_erp_vendor": "<string or null>",
@@ -73,7 +74,8 @@ Extract ALL qualification data from the transcript and return a JSON object with
     "gatekeeper_reached": <true/false>,
     "caller_name": "<full name if the caller introduced themselves during the call, null if never stated>",
     "caller_company": "<company name if the caller mentioned their company, null if never stated>",
-    "caller_title": "<job title/role if the caller mentioned it, null if never stated>"
+    "caller_title": "<job title/role if the caller mentioned it, null if never stated>",
+    "inbound_call_type": "<esl_inquiry|support_request|partnership|press_media|vendor|other — set for inbound receptionist calls; null for outbound>"
   },
   "crm_notes": "<Professional CRM-ready notes that a human sales rep would want to read before a follow-up call. Include all relevant context, pain points, tech stack, and next steps.>"
 }
