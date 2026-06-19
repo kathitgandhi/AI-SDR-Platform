@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Megaphone, Users, PhoneCall,
-  CalendarCheck, Activity, Settings, LogOut, Bot,
+  CalendarCheck, Activity, Settings, LogOut, Bot, HelpCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
@@ -19,6 +19,7 @@ const NAV = [
   { type: 'divider', label: 'SYSTEM' },
   { label: 'Queue Monitor', href: '/queues', icon: Activity },
   { label: 'Settings', href: '/settings', icon: Settings },
+  { label: 'Help & Guide', href: '/help', icon: HelpCircle },
 ] as const;
 
 export function Sidebar() {
