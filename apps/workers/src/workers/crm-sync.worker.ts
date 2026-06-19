@@ -132,6 +132,18 @@ async function syncLead(
     } catch (e) {
       logger.warn({ err: (e as Error).message }, 'Contact sync failed');
     }
+  } else if (customerId && contact.phone_direct) {
+    // Inbound caller with no email — find or create by phone number
+    try {
+      contactCrmId = await adapter.findOrCreateContactByPhone({
+        customerId,
+        phone: contact.phone_direct,
+        firstName: contact.first_name,
+        lastName: contact.last_name,
+      });
+    } catch (e) {
+      logger.warn({ err: (e as Error).message }, 'Phone contact find/create failed');
+    }
   }
 
   // 3. lead/deal
@@ -295,7 +307,30 @@ async function syncCall(
 
     // Support request → open a ticket
     if (inboundCallType === 'support_request') {
-      const crmContactId = (lead as any).crm_contact_id ?? '';
+      let crmContactId = (lead as any).crm_contact_id ?? '';
+
+      // If crm_contact_id was null (stale lead row or phone-only inbound caller),
+      // try to resolve it from AirDesk by phone before giving up.
+      if (!crmContactId && crmCustomerId && contact.phone_direct) {
+        try {
+          crmContactId = await adapter.findOrCreateContactByPhone({
+            customerId: crmCustomerId,
+            phone: contact.phone_direct,
+            firstName: contact.first_name,
+            lastName: contact.last_name,
+          });
+          // Persist so future syncs skip this lookup
+          if (crmContactId) {
+            await supabase.from('leads').update({
+              crm_contact_id: crmContactId,
+              updated_at: new Date().toISOString(),
+            }).eq('id', leadId);
+          }
+        } catch (e) {
+          logger.warn({ err: (e as Error).message, callId }, 'Phone contact fallback failed for ticket');
+        }
+      }
+
       if (crmContactId) {
         try {
           const summary = callAnalysis.summary ?? 'Inbound support call — see transcript.';
@@ -310,6 +345,8 @@ async function syncCall(
         } catch (e) {
           logger.warn({ err: (e as Error).message, callId }, 'Failed to create AirDesk360 ticket');
         }
+      } else {
+        logger.warn({ callId }, 'Skipping ticket — no contact ID and phone fallback failed');
       }
     }
   }

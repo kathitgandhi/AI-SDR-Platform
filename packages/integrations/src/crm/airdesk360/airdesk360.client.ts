@@ -245,6 +245,55 @@ export class AirDesk360Adapter implements ICrmAdapter {
     }
   }
 
+  private async findContactIdByPhone(customerId: string, phone: string): Promise<string | null> {
+    try {
+      const res = await this.http.get(`/api/contacts/${encodeURIComponent(customerId)}`);
+      if (!Array.isArray(res.data)) return null;
+      type Row = { id?: string; phonenumber?: string };
+      // Normalise to last 10 digits for fuzzy match across +1 prefix differences
+      const normalise = (p: string) => p.replace(/\D/g, '').slice(-10);
+      const wanted = normalise(phone);
+      if (!wanted) return null;
+      const match = (res.data as Row[]).find((r) => normalise(r.phonenumber ?? '') === wanted);
+      return match?.id ? String(match.id) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Find a contact under a customer by phone number, or create a minimal one if
+   * not found. Used for inbound callers who have no email address.
+   */
+  async findOrCreateContactByPhone(params: {
+    customerId: string | number;
+    phone: string;
+    firstName?: string;
+    lastName?: string;
+  }): Promise<string> {
+    const custId = String(params.customerId);
+    const existing = await this.findContactIdByPhone(custId, params.phone);
+    if (existing) return existing;
+
+    const firstName = params.firstName && params.firstName.toLowerCase() !== 'unknown'
+      ? params.firstName
+      : 'Inbound';
+    const lastName = params.lastName ?? 'Caller';
+
+    const res = await this.post('/api/contacts/', {
+      customer_id: custId,
+      firstname: firstName,
+      lastname: lastName,
+      phonenumber: params.phone,
+      password: `aisdr_${Math.random().toString(36).slice(2)}_${Date.now()}`,
+      is_primary: 'on',
+      donotsendwelcomeemail: 'on',
+    });
+    if (!res.data?.status) return '';
+
+    return (await this.findContactIdByPhone(custId, params.phone)) ?? '';
+  }
+
   /**
    * AirDesk360 has no "deals" entity. The closest analog is **Lead** which has a
    * status/source/assigned flow. Map our Deal → AirDesk360 Lead.
